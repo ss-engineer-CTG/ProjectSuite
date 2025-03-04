@@ -1,0 +1,99 @@
+Option Explicit
+Sub 工程表作成()
+    ' 変数の宣言
+    Dim formatFilePath As String
+    Dim formatWB As Workbook
+    Dim currentWB As Workbook
+    Dim oldEnableEvents As Boolean
+
+    ' 他のマクロを一時的に無効化
+    oldEnableEvents = Application.EnableEvents
+    Application.EnableEvents = False
+
+    On Error GoTo ErrorHandler
+
+    ' カレントブックの設定
+    Set currentWB = ThisWorkbook
+
+    ' ファイル選択ダイアログの表示
+    With Application.FileDialog(msoFileDialogFilePicker)
+        ' ダイアログのタイトル設定
+        .Title = "フォーマットファイルを選択してください"
+
+        ' 初期ディレクトリの設定（カレントディレクトリ）
+        .InitialFileName = ThisWorkbook.path & "\format_list\"
+
+        ' フィルターの設定（Excelファイルのみ）
+        .Filters.Clear
+        .Filters.Add "Excelファイル", "*.xlsx"
+
+        ' ダイアログを表示し、キャンセルされた場合は処理中断
+        If .Show = False Then
+            MsgBox "処理を中止します。", vbInformation
+            GoTo CleanExit
+        End If
+
+        ' 選択されたファイルのパスを取得
+        formatFilePath = .SelectedItems(1)
+    End With
+
+    ' 入力シートのクリア処理
+    With currentWB.Sheets("入力")
+        .Cells.Clear
+        .Cells.Interior.ColorIndex = xlNone
+    End With
+
+    ' フォーマットファイルを開く
+    Set formatWB = Workbooks.Open(formatFilePath)
+
+    ' フォーマットシートの存在確認
+    If SheetExists(formatWB, "フォーマット") = False Then
+        MsgBox "選択されたファイルに「フォーマット」シートが存在しません。", vbCritical
+        formatWB.Close SaveChanges:=False
+        GoTo CleanExit
+    End If
+
+    ' フォーマットシートの内容を入力シートにコピー
+    formatWB.Sheets("フォーマット").Cells.Copy
+    currentWB.Sheets("入力").Cells.PasteSpecial xlPasteAll
+
+    ' フォーマットファイルを閉じる
+    formatWB.Close SaveChanges:=False
+
+    ' クリップボードのクリア
+    Application.CutCopyMode = False
+
+    MsgBox "処理が完了しました。", vbInformation
+
+CleanExit:
+    ' イベントの設定を元に戻す
+    Application.EnableEvents = oldEnableEvents
+    Exit Sub
+ErrorHandler:
+    ' エラー発生時の処理
+    MsgBox "エラーが発生しました。" & vbNewLine & _
+           "エラー番号: " & Err.Number & vbNewLine & _
+           "エラー内容: " & Err.Description, vbCritical
+
+    ' 開いたブックがあれば閉じる
+    If Not formatWB Is Nothing Then
+        formatWB.Close SaveChanges:=False
+    End If
+
+    ' イベントの設定を元に戻してエラー終了
+    Application.EnableEvents = oldEnableEvents
+    Exit Sub
+End Sub
+' シートの存在確認関数
+Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
+    Dim ws As Worksheet
+
+    For Each ws In wb.Sheets
+        If ws.Name = sheetName Then
+            SheetExists = True
+            Exit Function
+        End If
+    Next ws
+
+    SheetExists = False
+End Function

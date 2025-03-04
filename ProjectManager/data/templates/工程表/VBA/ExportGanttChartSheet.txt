@@ -1,0 +1,62 @@
+Sub ExportGanttChartSheet()
+    Dim ws As Worksheet
+    Dim targetSheet As Worksheet
+    Dim latestDate As Date
+    Dim newWorkbook As Workbook
+    Dim currentWorkbook As Workbook
+    Dim fileName As String
+
+    ' 現在のワークブックを設定
+    Set currentWorkbook = ThisWorkbook
+
+    ' 初期化
+    latestDate = DateSerial(1900, 1, 1)
+    Set targetSheet = Nothing
+
+    ' 全シートをループして「ガントチャート」を含む最新シートを探す
+    For Each ws In currentWorkbook.Sheets
+        If InStr(ws.Name, "ガントチャート") > 0 Then
+            ' シートの作成日時を取得
+            If ws.Parent.BuiltinDocumentProperties("Creation Date") > latestDate Then
+                latestDate = ws.Parent.BuiltinDocumentProperties("Creation Date")
+                Set targetSheet = ws
+            End If
+        End If
+    Next ws
+
+    ' 対象シートが見つかった場合
+    If Not targetSheet Is Nothing Then
+        ' 新しいファイル名を作成（現在のファイル名の.xlsmを.xlsxに変更）
+        fileName = Left(currentWorkbook.Name, InStrRev(currentWorkbook.Name, ".") - 1) & ".xlsx"
+
+        ' 新しいワークブックを作成
+        Set newWorkbook = Application.Workbooks.Add
+
+        ' 対象シートをコピー
+        targetSheet.Copy Before:=newWorkbook.Sheets(1)
+
+        ' 不要なシートを削除
+        Application.DisplayAlerts = False
+        newWorkbook.Sheets(2).Delete
+        Application.DisplayAlerts = True
+
+        ' 既存のファイルが存在するか確認
+        If Len(Dir(currentWorkbook.path & "\" & fileName)) > 0 Then
+            ' 既存のファイルを削除
+            Kill currentWorkbook.path & "\" & fileName
+        End If
+
+        ' 新しいファイルとして保存（同じパスに保存）
+        newWorkbook.SaveAs fileName:=currentWorkbook.path & "\" & fileName, _
+                          FileFormat:=xlOpenXMLWorkbook
+
+        ' 新しいワークブックを閉じる
+        newWorkbook.Close SaveChanges:=False
+
+        MsgBox "ガントチャートシートを """ & fileName & """ として保存しました。", _
+               vbInformation, "完了"
+    Else
+        MsgBox "「ガントチャート」を含むシートが見つかりませんでした。", _
+               vbExclamation, "警告"
+    End If
+End Sub

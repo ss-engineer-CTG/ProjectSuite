@@ -1,0 +1,43 @@
+# Python 仮想環境関連
+venv/
+env/
+Lib/
+Scripts/
+bin/
+Include/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+
+# IDE（VSCode, PyCharm）関連
+.vscode/
+.idea/
+
+# ビルド関連
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# ログファイル
+logs/
+*.log
+
+# OS固有の不要ファイル
+.DS_Store
+Thumbs.db
+
+# PyInstaller関連
+*.spec
+*.exe
+*.dll
+*.so
+
+# Jupyter Notebook のチェックポイント
+.ipynb_checkpoints/
+
+# 環境変数や秘密情報を含むファイル
+.env
+config.json

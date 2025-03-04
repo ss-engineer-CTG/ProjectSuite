@@ -1,0 +1,384 @@
+Sub CreateGanttChart()
+    On Error GoTo ErrorHandler
+    
+    ' 警告メッセージを非表示に設定
+    Application.DisplayAlerts = False
+    
+    ' 入力シートの取得
+    Dim wsInput As Worksheet
+    Dim wsGantt As Worksheet
+    
+    ' 色の定義を拡張
+    Dim SUNDAY_BACKGROUND As Long
+    Dim SATURDAY_BACKGROUND As Long
+    Dim SUNDAY_FONT As Long
+    Dim SATURDAY_FONT As Long
+    Dim TASK_BAR_COLOR As Long
+    Dim TASK_NAME_COLOR As Long
+    Dim PAST_PERIOD_COLOR As Long        ' 過去期間の色
+    Dim WARNING_COLOR As Long            ' 警告色
+    Dim CURRENT_DATE_LINE_COLOR As Long  ' 現在日マーカーの色
+    Dim COMPLETED_TASK_COLOR As Long     ' 完了タスクの色
+    
+    ' 色の初期化
+    SUNDAY_BACKGROUND = RGB(255, 220, 220)    ' より薄い赤
+    SATURDAY_BACKGROUND = RGB(220, 220, 255)   ' より薄い青
+    SUNDAY_FONT = RGB(220, 0, 0)              ' 暗めの赤
+    SATURDAY_FONT = RGB(0, 0, 220)            ' 暗めの青
+    TASK_BAR_COLOR = RGB(180, 255, 180)       ' 薄い緑
+    TASK_NAME_COLOR = RGB(0, 80, 0)          ' 濃い緑
+    PAST_PERIOD_COLOR = RGB(230, 230, 230)    ' 薄いグレー
+    WARNING_COLOR = RGB(255, 180, 180)        ' 薄い赤
+    CURRENT_DATE_LINE_COLOR = RGB(128, 0, 128) ' 紫
+    COMPLETED_TASK_COLOR = RGB(180, 180, 180) ' グレー
+
+    ' 入力シートの確認
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Worksheets("入力")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        MsgBox "「入力」シートが見つかりません。シート名を確認してください。", vbExclamation
+        Exit Sub
+    End If
+    
+    ' データ範囲の確認と拡張（ステータス列を含む）
+    Dim lastRow As Long
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    If lastRow < 2 Then
+        MsgBox "入力データが見つかりません。", vbExclamation
+        Exit Sub
+    End If
+    
+    ' ステータス列のヘッダー確認
+    If wsInput.Cells(1, 4).Value <> "ステータス" Then
+        MsgBox "D列のヘッダーが「ステータス」ではありません。", vbExclamation
+        Exit Sub
+    End If
+    
+    ' 新しいシートを追加
+    Set wsGantt = ThisWorkbook.Sheets.Add
+    wsGantt.Name = "ガントチャート" & Format(Now, "yyyymmdd_hhmmss")
+    
+    ' ヘッダーを設定（拡張）
+    wsGantt.Cells(4, 1) = "タスク名"
+    wsGantt.Cells(4, 2) = "開始日"
+    wsGantt.Cells(4, 3) = "終了日"
+    wsGantt.Cells(4, 4) = "期間"
+    wsGantt.Cells(4, 5) = "ステータス"
+    
+    ' データを入力シートからコピー（ステータスを含む）
+    Dim i As Long
+    For i = 2 To lastRow
+        wsGantt.Cells(i + 3, 1) = wsInput.Cells(i, 1)  ' タスク名
+        wsGantt.Cells(i + 3, 5) = wsInput.Cells(i, 4)  ' ステータス
+        
+        ' 開始日と終了日を検証してコピー
+        If IsDate(wsInput.Cells(i, 2)) And IsDate(wsInput.Cells(i, 3)) Then
+            Dim startDate As Date
+            Dim endDate As Date
+            startDate = CDate(wsInput.Cells(i, 2))
+            endDate = CDate(wsInput.Cells(i, 3))
+            
+            If startDate > endDate Then
+                MsgBox "行 " & i & " の開始日が終了日より後になっています。", vbExclamation
+                wsGantt.Delete
+                Exit Sub
+            End If
+            
+            wsGantt.Cells(i + 3, 2) = startDate
+            wsGantt.Cells(i + 3, 3) = endDate
+            wsGantt.Cells(i + 3, 4) = dateDiff("d", startDate, endDate) + 1
+        Else
+            MsgBox "行 " & i & " の日付形式が正しくありません。", vbExclamation
+            wsGantt.Delete
+            Exit Sub
+        End If
+    Next i
+    
+    ' 日付のフォーマットを設定
+    wsGantt.Range("B:C").NumberFormat = "yyyy/mm/dd"
+    
+    ' ガントチャート用の日付ヘッダーを作成
+    Dim chartStartDate As Date
+    Dim chartEndDate As Date
+    chartStartDate = WorksheetFunction.Min(wsGantt.Range("B5:B" & lastRow + 3))
+    chartEndDate = WorksheetFunction.Max(wsGantt.Range("C5:C" & lastRow + 3))
+    
+    ' 日付ヘッダーの開始列
+    Const CHART_START_COL As Integer = 6
+    
+    ' 現在の日付を取得
+    Dim currentSystemDate As Date
+    currentSystemDate = Date
+    
+    ' 日付ヘッダーを作成（過去期間の色分けを含む）
+    Dim currentDate As Date
+    Dim col As Integer
+    currentDate = chartStartDate
+    col = CHART_START_COL
+    
+    ' 年月の結合用の変数
+    Dim yearStartCol As Integer
+    Dim monthStartCol As Integer
+    Dim currentYear As Integer
+    Dim currentMonth As Integer
+    
+    yearStartCol = col
+    monthStartCol = col
+    currentYear = Year(currentDate)
+    currentMonth = Month(currentDate)
+    
+    ' 現在日付のマーカー列を保存
+    Dim currentDateColumn As Integer
+    currentDateColumn = 0
+    
+    ' 背景色の設定（ヘッダー部分のみ）
+    Do While currentDate <= chartEndDate
+        ' 年を表示
+        wsGantt.Cells(1, col) = Year(currentDate) & "年"
+        
+        ' 月を表示
+        wsGantt.Cells(2, col) = Month(currentDate) & "月"
+        
+        ' 日を表示
+        With wsGantt.Cells(3, col)
+            .Value = Day(currentDate)
+            .Font.Size = 6
+        End With
+        
+        ' 曜日を表示
+        With wsGantt.Cells(4, col)
+            .Value = WeekdayName(Weekday(currentDate, vbSunday), True)
+            .Font.Size = 6
+            
+            ' 土日の文字色設定
+            If Weekday(currentDate, vbSunday) = 1 Then  ' 日曜日
+                .Font.Color = SUNDAY_FONT
+            ElseIf Weekday(currentDate, vbSunday) = 7 Then  ' 土曜日
+                .Font.Color = SATURDAY_FONT
+            End If
+        End With
+        
+        ' 現在日付のマーカー列を記録
+        If Format(currentDate, "yyyy/mm/dd") = Format(currentSystemDate, "yyyy/mm/dd") Then
+            currentDateColumn = col
+        End If
+        
+        ' ヘッダー部分の背景色設定
+        With wsGantt.Range(wsGantt.Cells(1, col), wsGantt.Cells(4, col))
+            If Weekday(currentDate, vbSunday) = 1 Then  ' 日曜日
+                .Interior.Color = SUNDAY_BACKGROUND
+            ElseIf Weekday(currentDate, vbSunday) = 7 Then  ' 土曜日
+                .Interior.Color = SATURDAY_BACKGROUND
+            End If
+        End With
+        
+        ' 次の日付へ
+        currentDate = currentDate + 1
+        
+        ' 年が変わる場合、または最終日の場合にセルを結合
+        If Year(currentDate) <> currentYear Or currentDate > chartEndDate Then
+            wsGantt.Range(wsGantt.Cells(1, yearStartCol), wsGantt.Cells(1, col)).Merge
+            yearStartCol = col + 1
+            currentYear = Year(currentDate)
+        End If
+        
+        ' 月が変わる場合、または最終日の場合にセルを結合
+        If Month(currentDate) <> currentMonth Or currentDate > chartEndDate Then
+            wsGantt.Range(wsGantt.Cells(2, monthStartCol), wsGantt.Cells(2, col)).Merge
+            monthStartCol = col + 1
+            currentMonth = Month(currentDate)
+        End If
+        
+        col = col + 1
+    Loop
+    
+    ' タスク部分の背景色とバーを設定
+    Dim rowIndex As Integer
+    Dim lastGanttRow As Long
+    lastGanttRow = wsGantt.Cells(wsGantt.Rows.Count, "A").End(xlUp).Row
+    
+    For rowIndex = 5 To lastGanttRow
+        ' タスクの状態を取得
+        Dim taskStart As Date
+        Dim taskEnd As Date
+        Dim taskStatus As String
+        
+        taskStart = wsGantt.Cells(rowIndex, 2).Value
+        taskEnd = wsGantt.Cells(rowIndex, 3).Value
+        taskStatus = wsGantt.Cells(rowIndex, 5).Value
+        
+        ' バーの開始列と終了列を計算
+        Dim startCol As Integer
+        Dim endCol As Integer
+        startCol = CHART_START_COL + dateDiff("d", chartStartDate, taskStart)
+        endCol = CHART_START_COL + dateDiff("d", chartStartDate, taskEnd)
+        
+        ' 背景色を設定（タスクバーがない部分のみ）
+        Dim currentCol As Integer
+        For currentCol = CHART_START_COL To col - 1
+            ' タスクバーの範囲外かどうかを確認
+            If currentCol < startCol Or currentCol > endCol Then
+                Dim cellDate As Date
+                cellDate = DateAdd("d", currentCol - CHART_START_COL, chartStartDate)
+                
+                ' 土日チェック
+                Select Case Weekday(cellDate, vbSunday)
+                    Case 1  ' 日曜日
+                        wsGantt.Cells(rowIndex, currentCol).Interior.Color = SUNDAY_BACKGROUND
+                    Case 7  ' 土曜日
+                        wsGantt.Cells(rowIndex, currentCol).Interior.Color = SATURDAY_BACKGROUND
+                    Case Else  ' 平日
+                        ' 過去日付の場合のみ背景色を設定
+                        If cellDate < currentSystemDate Then
+                            wsGantt.Cells(rowIndex, currentCol).Interior.Color = PAST_PERIOD_COLOR
+                        End If
+                End Select
+            End If
+        Next currentCol
+        
+        ' タスクバーを描画（期限超過の判定を改善）
+        With wsGantt.Range(wsGantt.Cells(rowIndex, startCol), wsGantt.Cells(rowIndex, endCol))
+            Select Case taskStatus
+                Case "完了"
+                    .Interior.Color = COMPLETED_TASK_COLOR
+                Case "進行中"
+                    If taskEnd < currentSystemDate Then
+                        .Interior.Color = WARNING_COLOR  ' 期限超過
+                    Else
+                        .Interior.Color = TASK_BAR_COLOR
+                    End If
+                Case Else  ' 未着手などの場合
+                    If taskEnd < currentSystemDate Then
+                        .Interior.Color = WARNING_COLOR  ' 期限超過
+                    Else
+                        .Interior.Color = TASK_BAR_COLOR
+                    End If
+            End Select
+            .Borders.Weight = xlThin
+        End With
+        
+        ' タスク名をバーの先頭に表示
+        With wsGantt.Cells(rowIndex, startCol)
+            .Value = wsGantt.Cells(rowIndex, 1).Value
+            .Font.Color = TASK_NAME_COLOR
+            .Font.Bold = True
+            .HorizontalAlignment = xlLeft
+            .IndentLevel = 1
+        End With
+    Next rowIndex
+    
+    ' 書式設定
+    With wsGantt
+        ' 列幅の調整
+        .Columns("A:E").AutoFit
+        .Range(.Columns(CHART_START_COL), .Columns(col - 1)).ColumnWidth = 1#
+        
+        ' 格子線の追加
+        With .Range(.Cells(1, 1), .Cells(lastGanttRow, col - 1))
+            .Borders(xlEdgeLeft).LineStyle = xlContinuous
+            .Borders(xlEdgeTop).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlEdgeRight).LineStyle = xlContinuous
+            .Borders(xlInsideVertical).LineStyle = xlContinuous
+            .Borders(xlInsideHorizontal).LineStyle = xlContinuous
+            .Borders.Weight = xlThin
+        End With
+    End With
+
+    ' ウィンドウ枠の固定
+    With wsGantt
+        .Activate    ' ガントチャートシートをアクティブにする
+        .Range("F5").Select    ' F5セルを選択
+        ActiveWindow.FreezePanes = True    ' ウィンドウ枠を固定
+    End With
+    
+    ' 凡例の追加
+    Dim legendRow As Long
+    legendRow = lastGanttRow + 2
+    
+    With wsGantt
+        ' 凡例のヘッダー
+        .Cells(legendRow, 1).Value = "【凡例】"
+        .Cells(legendRow, 1).Font.Bold = True
+        
+        ' 各項目の凡例
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "進行中タスク"
+        .Range(.Cells(legendRow, 2), .Cells(legendRow, 3)).Interior.Color = TASK_BAR_COLOR
+        
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "完了タスク"
+        .Range(.Cells(legendRow, 2), .Cells(legendRow, 3)).Interior.Color = COMPLETED_TASK_COLOR
+        
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "期限超過タスク"
+        .Range(.Cells(legendRow, 2), .Cells(legendRow, 3)).Interior.Color = WARNING_COLOR
+        
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "過去の期間"
+        .Range(.Cells(legendRow, 2), .Cells(legendRow, 3)).Interior.Color = PAST_PERIOD_COLOR
+
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "土曜日"
+        .Range(.Cells(legendRow, 2), .Cells(legendRow, 3)).Interior.Color = SATURDAY_BACKGROUND
+
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "日曜日"
+        .Range(.Cells(legendRow, 2), .Cells(legendRow, 3)).Interior.Color = SUNDAY_BACKGROUND
+        
+        legendRow = legendRow + 1
+        .Cells(legendRow, 1).Value = "現在日"
+        With .Range(.Cells(legendRow, 2), .Cells(legendRow, 2)).Borders(xlEdgeLeft)
+            .Color = CURRENT_DATE_LINE_COLOR
+            .Weight = xlThick
+            .LineStyle = xlContinuous
+        End With
+        
+        ' 凡例エリアの罫線
+        With .Range(.Cells(lastGanttRow + 2, 1), .Cells(legendRow, 3))
+            .Borders(xlEdgeLeft).LineStyle = xlContinuous
+            .Borders(xlEdgeTop).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlEdgeRight).LineStyle = xlContinuous
+            .Borders(xlInsideHorizontal).LineStyle = xlContinuous
+        End With
+    End With
+    
+    ' 現在日マーカーの処理（最後に実施）
+    If currentDateColumn > 0 Then
+        ' ヘッダーから最終行までの範囲を選択
+        With wsGantt.Range(wsGantt.Cells(1, currentDateColumn), _
+                        wsGantt.Cells(lastGanttRow, currentDateColumn))
+            ' 左罫線を紫色の太線で描画
+            With .Borders(xlEdgeLeft)
+                .Color = CURRENT_DATE_LINE_COLOR
+                .Weight = xlThick
+                .LineStyle = xlContinuous
+            End With
+        End With
+        
+        ' 現在日付のセルに「TODAY」マーカーを追加
+        With wsGantt.Cells(3, currentDateColumn)
+            .Font.Color = CURRENT_DATE_LINE_COLOR
+            .Font.Bold = True
+        End With
+    End If
+    
+    ' F列2行目の塗りつぶしを解除
+    With wsGantt
+        .Range("F2").EntireRow.Interior.Pattern = xlNone
+    End With
+    
+    ' 警告メッセージを再有効化
+    Application.DisplayAlerts = True
+    
+    Exit Sub
+
+ErrorHandler:
+    Application.DisplayAlerts = True
+    MsgBox "エラーが発生しました: " & Err.Description, vbCritical
+End Sub
+

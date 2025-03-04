@@ -1,0 +1,29 @@
+Sub DeleteGanttChartSheets()
+    'シート削除時の警告を無効化
+    Application.DisplayAlerts = False
+
+    '変数の宣言
+    Dim ws As Worksheet
+    Dim wsCount As Long
+    Dim i As Long
+
+    'ワークシートの数を取得
+    wsCount = ThisWorkbook.Worksheets.Count
+
+    '後ろのシートから検索して削除（前から削除すると位置がずれる）
+    For i = wsCount To 1 Step -1
+        Set ws = ThisWorkbook.Worksheets(i)
+
+        'シート名に"ガントチャート"が含まれているかチェック
+        If InStr(ws.Name, "ガントチャート") > 0 Then
+            'シートを削除
+            ws.Delete
+        End If
+    Next i
+
+    '削除完了メッセージを表示
+    MsgBox "ガントチャートを含むシートの削除が完了しました。", vbInformation
+
+    'シート削除時の警告を有効化
+    Application.DisplayAlerts = True
+End Sub
