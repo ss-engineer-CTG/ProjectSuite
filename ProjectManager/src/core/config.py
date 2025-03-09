@@ -2,25 +2,35 @@
 
 import os
 import logging
+import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, List, Optional, Union
 
 class Config:
-    # プロジェクトのルートディレクトリを取得
-    ROOT_DIR = Path(__file__).parent.parent.parent
+    # 実行パスに関わらず動作するように設定
+    if getattr(sys, 'frozen', False):
+        # PyInstallerで実行ファイル化した場合
+        ROOT_DIR = Path(sys._MEIPASS)
+    else:
+        # 通常のPython実行の場合
+        ROOT_DIR = Path(__file__).parent.parent.parent
     
     # データディレクトリ
     DATA_DIR = ROOT_DIR
     
-    # プロジェクトルートパスを定義
-    PROJECT_ROOT = Path('C:/Users/gbrai/Documents/Projects/app_Task_Management/ProjectManager')
-
-    # デフォルト値設定ファイルのパス
+    # プロジェクトルートパスを定義（柔軟に対応）
+    PROJECT_ROOT = ROOT_DIR
+    
+    # デフォルト値設定ファイルのパス（検索順）
+    # 1. アプリケーションディレクトリ直下
+    # 2. dataフォルダ内
+    # 3. configフォルダ内
+    # 4. ユーザーホームディレクトリ
     DEFAULT_VALUE_PATHS = [
-        PROJECT_ROOT / 'defaults.txt',  # プロジェクトルート直下のdefaults.txt
-        PROJECT_ROOT / 'data' / 'defaults.txt',  # dataフォルダ内
-        PROJECT_ROOT / 'config' / 'defaults.txt',  # configフォルダ内
-        Path.home() / 'ProjectManager/defaults.txt'  # ユーザーホームディレクトリ
+        ROOT_DIR / 'defaults.txt',
+        ROOT_DIR / 'data' / 'defaults.txt',
+        ROOT_DIR / 'config' / 'defaults.txt',
+        Path.home() / 'ProjectManager/defaults.txt'
     ]
     
     # マスターディレクトリ

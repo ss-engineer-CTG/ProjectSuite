@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 app = dash.Dash(__name__)
 app.index_string = HTML_TEMPLATE
 
+
 # アプリケーションのレイアウト
 app.layout = html.Div([
     # 更新ボタン（非表示）
@@ -47,27 +48,11 @@ app.layout = html.Div([
                    style={'color': COLORS['text']['primary']}),
             html.P(id='update-time',
                   style={'color': COLORS['text']['secondary']})
-        ], style=STYLES['container']),
-        
-        # 閉じるボタンを追加
-        html.Button('ダッシュボードを閉じる', 
-                   id='close-button', 
-                   style={
-                       'position': 'absolute',
-                       'top': '10px',
-                       'right': '10px',
-                       'backgroundColor': COLORS['status']['danger'],
-                       'color': 'white',
-                       'border': 'none',
-                       'padding': '8px 15px',
-                       'borderRadius': '4px',
-                       'cursor': 'pointer'
-                   })
+        ], style=STYLES['container'])
     ], style={
         'backgroundColor': COLORS['surface'],
         'borderBottom': '1px solid rgba(255,255,255,0.1)',
-        'boxShadow': '0 2px 4px rgba(0,0,0,0.2)',
-        'position': 'relative'  # 追加: ボタンの絶対配置に必要
+        'boxShadow': '0 2px 4px rgba(0,0,0,0.2)'
     }),
     
     # メインコンテンツ
@@ -126,22 +111,7 @@ app.layout = html.Div([
               'minHeight': '100vh'})
 ], style={'backgroundColor': COLORS['background']})
 
-# 閉じるボタンのコールバック
-@app.callback(
-    Output("dummy-output", "children", allow_duplicate=True),  # allow_duplicateを追加
-    Input("close-button", "n_clicks"),
-    prevent_initial_call=True
-)
-def close_dashboard(n_clicks):
-    if n_clicks:
-        # 自分自身を終了
-        shutdown_server()
-    return ""
-
-# コールバックの登録
-register_callbacks(app)
-
-# シャットダウンエンドポイントを追加
+# シャットダウンエンドポイントを維持（外部からの終了に必要）
 @app.server.route('/shutdown', methods=['POST'])
 def shutdown_server():
     """サーバーをシャットダウンするエンドポイント"""
@@ -156,7 +126,22 @@ def shutdown_server():
         func()
     return 'ダッシュボードサーバーを終了しています...'
 
+# コールバックの登録
+register_callbacks(app)
+
 # アプリケーション起動
 if __name__ == '__main__':
     logger.info("Starting dashboard application")
-    app.run_server(debug=True)
+    try:
+        # デバッグモードを無効化、ポートと通信設定を明示的に指定
+        app.run_server(
+            debug=False,  
+            port=8050,
+            host='127.0.0.1',
+            use_reloader=False  # リローダーを無効化（PyInstallerで問題の原因になりうる）
+        )
+    except Exception as e:
+        logger.error(f"Failed to start dashboard: {e}")
+        # 標準エラー出力にも出力（親プロセスがキャプチャできるように）
+        import sys
+        print(f"Dashboard startup error: {e}", file=sys.stderr)

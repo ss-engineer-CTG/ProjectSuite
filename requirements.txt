@@ -1,20 +1,12 @@
-# 基本依存関係
-customtkinter>=5.0.0
-pandas>=1.5.0
-openpyxl>=3.0.10
+pyinstaller>=5.9.0
+pandas>=1.5.3
+numpy>=1.24.3
+dash>=2.9.3
+dash-core-components>=2.0.0
+dash-html-components>=2.0.0
+plotly>=5.14.1
+openpyxl>=3.1.2
 xlrd>=2.0.1
 python-docx>=0.8.11
-portalocker>=2.5.0
-
-# ダッシュボード用
-dash>=2.7.0
-plotly>=5.10.0
-flask>=2.2.0
-
-# Windowsのみの依存
-pywin32>=303;platform_system=='Windows'
-
-# 開発用ツール
-pyinstaller>=5.6.0
-pytest>=7.0.0
-black>=22.10.0
+pywin32>=306; platform_system == "Windows"
+customtkinter>=5.2.0

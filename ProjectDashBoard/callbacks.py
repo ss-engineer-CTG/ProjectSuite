@@ -10,6 +10,9 @@ import logging
 import plotly.graph_objects as go
 from dash import html, Output, Input, State, ALL, callback_context
 from dash.exceptions import PreventUpdate
+import os
+import sys
+from pathlib import Path
 
 from ProjectDashBoard.config import COLORS, STYLES
 from ProjectDashBoard.data_processing import (
@@ -23,9 +26,70 @@ from ProjectDashBoard.file_utils import open_file_or_folder
 
 logger = logging.getLogger(__name__)
 
-# ダッシュボード更新用のデータファイルパス
-DASHBOARD_FILE_PATH = r'C:\Users\gbrai\Documents\Projects\app_Task_Management\ProjectManager\data\exports\dashboard.csv'
+# ★★★ 追加: パス解決機能 ★★★
+def resolve_dashboard_path():
+    """環境に応じたダッシュボードデータパスを解決"""
+    logger.info("ダッシュボードデータパスの解決を開始")
+    
+    # 優先順位1: 環境変数からファイルパスを直接取得
+    if 'PMSUITE_DASHBOARD_FILE' in os.environ:
+        file_path = Path(os.environ['PMSUITE_DASHBOARD_FILE'])
+        logger.info(f"環境変数からファイルパスを取得: {file_path}")
+        if file_path.exists():
+            return str(file_path)
+        logger.warning(f"環境変数のファイルパスが存在しません: {file_path}")
+    
+    # 優先順位2: 環境変数からディレクトリを取得してファイル名を結合
+    if 'PMSUITE_DASHBOARD_DATA_DIR' in os.environ:
+        data_dir = Path(os.environ['PMSUITE_DASHBOARD_DATA_DIR'])
+        logger.info(f"環境変数からデータディレクトリを取得: {data_dir}")
+        dashboard_path = data_dir / "dashboard.csv"
+        if dashboard_path.exists():
+            logger.info(f"環境変数から解決したパスが存在します: {dashboard_path}")
+            return str(dashboard_path)
+        logger.warning(f"環境変数から解決したパスが存在しません: {dashboard_path}")
+    
+    # 優先順位3: 実行ファイルからの相対パス (PyInstaller環境)
+    if getattr(sys, 'frozen', False):
+        # ビルド環境の場合
+        base_dir = Path(sys._MEIPASS).parent / "data" / "exports"
+        dashboard_path = base_dir / "dashboard.csv"
+        logger.info(f"PyInstaller環境でパスを解決: {dashboard_path}")
+        if dashboard_path.exists():
+            logger.info(f"パッケージからのパスが存在します: {dashboard_path}")
+            return str(dashboard_path)
+        logger.warning(f"パッケージからのパスが存在しません: {dashboard_path}")
+        
+        # 代替パス: 実行ファイルからの相対パス
+        exe_dir = Path(sys.executable).parent
+        alt_path = exe_dir / "data" / "exports" / "dashboard.csv"
+        logger.info(f"代替パスを試行: {alt_path}")
+        if alt_path.exists():
+            logger.info(f"代替パスが存在します: {alt_path}")
+            return str(alt_path)
+    
+    # 優先順位4: 現在の作業ディレクトリからの相対パス
+    cwd_path = Path.cwd() / "data" / "exports" / "dashboard.csv"
+    logger.info(f"作業ディレクトリからのパスを試行: {cwd_path}")
+    if cwd_path.exists():
+        logger.info(f"作業ディレクトリからのパスが存在します: {cwd_path}")
+        return str(cwd_path)
+    
+    # 優先順位5: ユーザーホームディレクトリ
+    home_path = Path.home() / "ProjectManagerSuite" / "data" / "exports" / "dashboard.csv"
+    logger.info(f"ホームディレクトリからのパスを試行: {home_path}")
+    if home_path.exists():
+        logger.info(f"ホームディレクトリからのパスが存在します: {home_path}")
+        return str(home_path)
+    
+    # フォールバック: もともとのハードコードされたパス
+    original_path = r'C:\Users\gbrai\Documents\Projects\app_Task_Management\ProjectManager\data\exports\dashboard.csv'
+    logger.warning(f"すべてのパス解決方法が失敗。ハードコードされたパスにフォールバック: {original_path}")
+    return original_path
 
+# ダッシュボード更新用のデータファイルパス（動的に解決）
+DASHBOARD_FILE_PATH = resolve_dashboard_path()
+logger.info(f"解決されたダッシュボードファイルパス: {DASHBOARD_FILE_PATH}")
 
 def register_callbacks(app):
     """

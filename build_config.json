@@ -1,0 +1,47 @@
+{
+    "app_info": {
+        "name": "ProjectManagerSuite",
+        "version": "1.0.0",
+        "publisher": "Your Company",
+        "url": "http://www.example.com/",
+        "description": "プロジェクト管理統合アプリケーション"
+    },
+    "build": {
+        "output_dir": "dist",
+        "build_dir": "build",
+        "log_dir": "build_logs",
+        "temp_dir": "temp",
+        "icon_path": "assets/icon.ico",
+        "use_upx": true,
+        "clean_build": true,
+        "create_installer": true
+    },
+    "dependencies": {
+        "python_min_version": [3, 8, 0],
+        "required_packages": {
+            "pyinstaller": ">=5.9.0,<6.0.0",
+            "pandas": ">=1.5.3,<2.0.0",
+            "numpy": ">=1.24.3,<2.0.0",
+            "dash": ">=2.9.3,<3.0.0",
+            "dash-core-components": ">=2.0.0,<3.0.0",
+            "dash-html-components": ">=2.0.0,<3.0.0",
+            "plotly": ">=5.14.1,<6.0.0",
+            "openpyxl": ">=3.1.2,<4.0.0",
+            "xlrd": ">=2.0.1,<3.0.0",
+            "customtkinter": ">=5.2.0,<6.0.0",
+            "pillow": ">=9.5.0,<10.0.0"
+        },
+        "optional_packages": {
+            "python-docx": ">=0.8.11",
+            "pywin32": ">=306"
+        }
+    },
+    "installer": {
+        "output_dir": "installer",
+        "file_name": "ProjectManagerSuite_Setup",
+        "languages": ["japanese"],
+        "create_desktop_icon": true,
+        "default_dir_name": "ProjectManagerSuite",
+        "license_file": "LICENSE"
+    }
+}
