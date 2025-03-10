@@ -55,7 +55,7 @@ class DashboardConnector:
                 self.logger.info("既存のダッシュボードプロセスを再利用します")
                 return
             
-            # PyInstaller環境と通常環境で起動方法を分ける
+            # ★★★ 修正: パスの解決方法を改善 ★★★
             if getattr(sys, 'frozen', False):
                 # パッケージ環境ではバッチファイルを使用
                 self.logger.info("パッケージ環境でダッシュボードを起動")
@@ -87,19 +87,33 @@ class DashboardConnector:
                 python_executable = sys.executable
                 self.logger.info("開発環境でダッシュボードを起動")
                 
-                # mainモジュールのスタンドアロン実行機能を使用
+                # ★★★ 修正: 正しいモジュールパスを指定 ★★★
+                # ProjectDashBoardを直接実行
                 cmd = [
                     python_executable,
-                    "-m", 
-                    "ProjectManager.src.main",
-                    "ProjectDashBoard"
+                    "-m",
+                    "ProjectDashBoard.run_standalone"
                 ]
+                
+                self.logger.info(f"実行コマンド: {cmd}")
+                
+                # ★★★ 修正: 環境変数 PYTHONPATH に現在のディレクトリを追加 ★★★
+                env = os.environ.copy()
+                # 現在のディレクトリを PYTHONPATH に追加
+                current_dir = os.getcwd()
+                if 'PYTHONPATH' in env:
+                    env['PYTHONPATH'] = f"{current_dir}{os.pathsep}{env['PYTHONPATH']}"
+                else:
+                    env['PYTHONPATH'] = current_dir
+                
+                self.logger.info(f"環境変数 PYTHONPATH: {env.get('PYTHONPATH')}")
                 
                 self.dashboard_process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    env=env  # 環境変数を設定
                 )
             
             # 非同期でログを取得
