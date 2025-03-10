@@ -23,6 +23,20 @@ class PathManager:
         """
         if not path:
             return ""
+        
+        # PathRegistryを使用してパスを正規化
+        try:
+            from PathRegistry import PathRegistry
+            registry = PathRegistry.get_instance()
+            
+            # レジストリからのパス解決を試みる
+            for key, registered_path in registry.get_all_paths().items():
+                if str(registered_path) == str(path):
+                    resolved_path = registry.get_path(key)
+                    if resolved_path:
+                        return str(resolved_path)
+        except ImportError:
+            pass  # PathRegistryが使えない場合は通常の正規化に進む
             
         normalized = str(Path(path).resolve())
         return normalized

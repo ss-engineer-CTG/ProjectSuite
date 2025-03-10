@@ -30,21 +30,39 @@ def setup_environment():
     
     logger.info(f"現在のスクリプトパス: {current_script_path}")
     logger.info(f"プロジェクトルート: {project_root}")
+    logger.info(f"作業ディレクトリ: {os.getcwd()}")
     
     # プロジェクトルートをパスに追加
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
         logger.info(f"PYTHONPATHに追加: {project_root}")
     
-    # 環境変数の確認
+    # ダッシュボードディレクトリをパスに追加
+    dashboard_dir = project_root / "ProjectDashBoard"
+    if str(dashboard_dir) not in sys.path:
+        sys.path.insert(0, str(dashboard_dir))
+        logger.info(f"PYTHONPATHに追加: {dashboard_dir}")
+    
+    # 環境変数のパス情報をログに出力
     logger.info(f"環境変数 PYTHONPATH: {os.environ.get('PYTHONPATH', '未設定')}")
     logger.info(f"環境変数 PMSUITE_DASHBOARD_DATA_DIR: {os.environ.get('PMSUITE_DASHBOARD_DATA_DIR', '未設定')}")
     logger.info(f"環境変数 PMSUITE_DASHBOARD_FILE: {os.environ.get('PMSUITE_DASHBOARD_FILE', '未設定')}")
     
-    # sys.pathの表示
-    logger.info("現在のPYTHONPATH:")
-    for p in sys.path:
-        logger.info(f"  {p}")
+    # PathRegistry初期化を試行
+    try:
+        from PathRegistry import PathRegistry
+        registry = PathRegistry.get_instance()
+        
+        # ダッシュボードのパスを取得して表示
+        dashboard_file = registry.get_path("DASHBOARD_FILE")
+        if dashboard_file:
+            logger.info(f"PathRegistryからダッシュボードファイルパス: {dashboard_file}")
+            if Path(dashboard_file).exists():
+                logger.info("ファイルは存在します")
+            else:
+                logger.warning("ファイルが存在しません")
+    except Exception as e:
+        logger.warning(f"PathRegistry初期化エラー: {e}")
 
 def main():
     """スタンドアロンモードでダッシュボードを実行"""

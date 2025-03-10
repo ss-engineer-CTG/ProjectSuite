@@ -37,14 +37,21 @@ class DashboardConnector:
             # CSVデータを最新に更新
             self.db_manager.update_dashboard()
             
-            # ★★★ 修正: Config クラスを直接インポートして参照 ★★★
-            from ProjectManager.src.core.config import Config
+            # パス情報をレジストリに登録
+            from PathRegistry import PathRegistry
+            registry = PathRegistry.get_instance()
             
             # 環境変数にデータパスを設定
+            from ProjectManager.src.core.config import Config
             export_dir = str(Config.DASHBOARD_EXPORT_DIR)
             dashboard_file = str(Config.DASHBOARD_EXPORT_FILE)
             os.environ['PMSUITE_DASHBOARD_DATA_DIR'] = export_dir
             os.environ['PMSUITE_DASHBOARD_FILE'] = dashboard_file
+            
+            # レジストリへの登録
+            registry.register_path("DASHBOARD_EXPORT_DIR", export_dir)
+            registry.register_path("DASHBOARD_FILE", dashboard_file)
+            
             self.logger.info(f"Dashboard data directory set: {export_dir}")
             self.logger.info(f"Dashboard file path set: {dashboard_file}")
             
@@ -55,22 +62,23 @@ class DashboardConnector:
                 self.logger.info("既存のダッシュボードプロセスを再利用します")
                 return
             
-            # ★★★ 修正: パスの解決方法を改善 ★★★
+            # 開発環境と実行環境の両方に対応
             if getattr(sys, 'frozen', False):
-                # パッケージ環境ではバッチファイルを使用
+                # パッケージ環境
                 self.logger.info("パッケージ環境でダッシュボードを起動")
-                
-                # バッチファイルが実行可能な場所にあるか確認
                 batch_path = Path(sys._MEIPASS).parent / "dashboard_launcher.bat"
                 
+                # バッチファイルが存在しない場合は作成
                 if not batch_path.exists():
-                    # バッチファイルが存在しない場合は作成
                     self.logger.info(f"バッチファイルを作成: {batch_path}")
                     with open(batch_path, 'w') as f:
                         f.write('@echo off\n')
                         f.write('REM ダッシュボード起動スクリプト\n')
                         f.write('SET PYTHONPATH=%~dp0\n')
                         f.write('"%~dp0ProjectManagerSuite.exe" ProjectDashBoard\n')
+                
+                # 環境変数をコピー
+                env = os.environ.copy()
                 
                 # バッチファイルを実行
                 self.logger.info(f"バッチファイル実行: {batch_path}")
@@ -80,42 +88,53 @@ class DashboardConnector:
                     cwd=str(batch_path.parent),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    env=env
                 )
             else:
-                # 開発環境では直接モジュールを実行
+                # 開発環境
                 python_executable = sys.executable
                 self.logger.info("開発環境でダッシュボードを起動")
                 
-                # ★★★ 修正: 正しいモジュールパスを指定 ★★★
-                # ProjectDashBoardを直接実行
+                # プロジェクトルートディレクトリを取得
+                project_root = None
+                try:
+                    # PathRegistryから取得
+                    project_root = registry.get_path("ROOT")
+                    if not project_root:
+                        # ファイルの位置から取得
+                        project_root = str(Path(__file__).parent.parent.parent.parent)
+                except:
+                    # フォールバック
+                    project_root = str(Path(__file__).parent.parent.parent.parent)
+                
+                self.logger.info(f"プロジェクトルート: {project_root}")
+                
+                # 環境変数の設定
+                env = os.environ.copy()
+                # PYTHONPATHを設定
+                env['PYTHONPATH'] = f"{project_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+                
+                self.logger.info(f"環境変数 PYTHONPATH: {env['PYTHONPATH']}")
+                
+                # run_standalone.pyを直接実行
                 cmd = [
                     python_executable,
-                    "-m",
-                    "ProjectDashBoard.run_standalone"
+                    "-m", "ProjectDashBoard.run_standalone"
                 ]
                 
                 self.logger.info(f"実行コマンド: {cmd}")
                 
-                # ★★★ 修正: 環境変数 PYTHONPATH に現在のディレクトリを追加 ★★★
-                env = os.environ.copy()
-                # 現在のディレクトリを PYTHONPATH に追加
-                current_dir = os.getcwd()
-                if 'PYTHONPATH' in env:
-                    env['PYTHONPATH'] = f"{current_dir}{os.pathsep}{env['PYTHONPATH']}"
-                else:
-                    env['PYTHONPATH'] = current_dir
-                
-                self.logger.info(f"環境変数 PYTHONPATH: {env.get('PYTHONPATH')}")
-                
+                # カレントディレクトリをプロジェクトルートに設定して実行
                 self.dashboard_process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    env=env  # 環境変数を設定
+                    env=env,
+                    cwd=project_root  # 重要: カレントディレクトリを設定
                 )
-            
+                
             # 非同期でログを取得
             threading.Thread(
                 target=self._log_subprocess_output,
@@ -157,6 +176,7 @@ class DashboardConnector:
             # 短い待機
             time.sleep(0.1)
     
+
     def _get_dashboard_path(self) -> Path:
         """
         ダッシュボードのpathを取得する
@@ -164,7 +184,28 @@ class DashboardConnector:
         Returns:
             Path: ダッシュボードアプリケーションのパス
         """
-        # 実行環境に応じたパス解決
+        # PathRegistryからパスを取得
+        from PathRegistry import PathRegistry
+        registry = PathRegistry.get_instance()
+        
+        # 優先順位1: DASHBOARD_FILE から直接取得
+        dashboard_path = registry.get_path("DASHBOARD_FILE")
+        if dashboard_path and Path(dashboard_path).exists():
+            return Path(dashboard_path)
+        
+        # 優先順位2: DASHBOARD_EXPORT_FILE から取得
+        dashboard_path = registry.get_path("DASHBOARD_EXPORT_FILE")
+        if dashboard_path and Path(dashboard_path).exists():
+            return Path(dashboard_path)
+        
+        # 優先順位3: EXPORTS_DIR / "dashboard.csv" から取得
+        exports_dir = registry.get_path("EXPORTS_DIR")
+        if exports_dir:
+            dashboard_path = Path(exports_dir) / "dashboard.csv"
+            if dashboard_path.exists():
+                return dashboard_path
+        
+        # 優先順位4: 実行環境に応じたパス解決
         if getattr(sys, 'frozen', False):
             # PyInstallerで実行ファイル化した場合
             dashboard_path = Path(sys._MEIPASS) / "ProjectDashBoard" / "app.py"
@@ -183,6 +224,7 @@ class DashboardConnector:
                 raise FileNotFoundError(f"ダッシュボードアプリケーションが見つかりません: {dashboard_path}")
         
         return dashboard_path
+
     
     def _open_browser_when_ready(self):
         """
@@ -276,3 +318,36 @@ class DashboardConnector:
             
             except Exception as e:
                 self.logger.error(f"ダッシュボード終了エラー: {e}")
+
+    def _monitor_output(self):
+        """サブプロセスの出力を監視する"""
+        for stream, default_level in [
+            (self.dashboard_process.stdout, logging.INFO),
+            (self.dashboard_process.stderr, logging.INFO)  # stderrもデフォルトでINFOに変更
+        ]:
+            def _read_stream(stream, default_level):
+                try:
+                    for line in stream:
+                        line = line.strip()
+                        if not line:
+                            continue
+                            
+                        # ログレベルを判断
+                        log_level = default_level
+                        prefix = "ダッシュボード出力"
+                        
+                        # 実際のエラーメッセージかどうかを内容で判断
+                        if " - ERROR - " in line or "Error:" in line or "Exception:" in line:
+                            log_level = logging.ERROR
+                            prefix = "ダッシュボードエラー"
+                        elif " - WARNING - " in line:
+                            log_level = logging.WARNING
+                            prefix = "ダッシュボード警告"
+                        
+                        # 適切なレベルでログ記録
+                        logging.log(log_level, f"{prefix}: {line}")
+                        
+                except Exception as e:
+                    logging.error(f"出力監視エラー: {e}")
+
+            threading.Thread(target=_read_stream, args=(stream, default_level), daemon=True).start()

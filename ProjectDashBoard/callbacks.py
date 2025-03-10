@@ -31,65 +31,60 @@ def resolve_dashboard_path():
     """環境に応じたダッシュボードデータパスを解決"""
     logger.info("ダッシュボードデータパスの解決を開始")
     
-    # 優先順位1: 環境変数からファイルパスを直接取得
+    # ログに詳細なパス情報を出力
+    logger.info(f"作業ディレクトリ: {os.getcwd()}")
+    logger.info(f"環境変数: PMSUITE_DASHBOARD_FILE={os.environ.get('PMSUITE_DASHBOARD_FILE', '未設定')}")
+    
+    # 1. 環境変数から直接取得
     if 'PMSUITE_DASHBOARD_FILE' in os.environ:
-        file_path = Path(os.environ['PMSUITE_DASHBOARD_FILE'])
-        logger.info(f"環境変数からファイルパスを取得: {file_path}")
-        if file_path.exists():
-            return str(file_path)
-        logger.warning(f"環境変数のファイルパスが存在しません: {file_path}")
-    
-    # 優先順位2: 環境変数からディレクトリを取得してファイル名を結合
-    if 'PMSUITE_DASHBOARD_DATA_DIR' in os.environ:
-        data_dir = Path(os.environ['PMSUITE_DASHBOARD_DATA_DIR'])
-        logger.info(f"環境変数からデータディレクトリを取得: {data_dir}")
-        dashboard_path = data_dir / "dashboard.csv"
-        if dashboard_path.exists():
-            logger.info(f"環境変数から解決したパスが存在します: {dashboard_path}")
-            return str(dashboard_path)
-        logger.warning(f"環境変数から解決したパスが存在しません: {dashboard_path}")
-    
-    # 優先順位3: 実行ファイルからの相対パス (PyInstaller環境)
-    if getattr(sys, 'frozen', False):
-        # ビルド環境の場合
-        base_dir = Path(sys._MEIPASS).parent / "data" / "exports"
-        dashboard_path = base_dir / "dashboard.csv"
-        logger.info(f"PyInstaller環境でパスを解決: {dashboard_path}")
-        if dashboard_path.exists():
-            logger.info(f"パッケージからのパスが存在します: {dashboard_path}")
-            return str(dashboard_path)
-        logger.warning(f"パッケージからのパスが存在しません: {dashboard_path}")
+        dashboard_path = os.environ['PMSUITE_DASHBOARD_FILE']
+        logger.info(f"環境変数からファイルパスを取得: {dashboard_path}")
         
-        # 代替パス: 実行ファイルからの相対パス
-        exe_dir = Path(sys.executable).parent
-        alt_path = exe_dir / "data" / "exports" / "dashboard.csv"
-        logger.info(f"代替パスを試行: {alt_path}")
-        if alt_path.exists():
-            logger.info(f"代替パスが存在します: {alt_path}")
-            return str(alt_path)
+        # 絶対パスに変換して存在確認
+        dashboard_path = str(Path(dashboard_path).resolve())
+        if Path(dashboard_path).exists():
+            logger.info(f"確認済みパス: {dashboard_path} (存在します)")
+            return dashboard_path
+        else:
+            logger.warning(f"ファイルが存在しません: {dashboard_path}")
     
-    # 優先順位4: 現在の作業ディレクトリからの相対パス
-    cwd_path = Path.cwd() / "data" / "exports" / "dashboard.csv"
-    logger.info(f"作業ディレクトリからのパスを試行: {cwd_path}")
-    if cwd_path.exists():
-        logger.info(f"作業ディレクトリからのパスが存在します: {cwd_path}")
-        return str(cwd_path)
+    # 2. PathRegistryから取得を試みる（絶対インポートを使用）
+    try:
+        import sys
+        project_root = Path(__file__).parent.parent.parent
+        if project_root not in sys.path:
+            sys.path.insert(0, str(project_root))
+        
+        from PathRegistry import PathRegistry
+        registry = PathRegistry.get_instance()
+        
+        # キーの優先順位で試行
+        for key in ["DASHBOARD_FILE", "DASHBOARD_EXPORT_FILE", "PROJECTS_EXPORT_FILE"]:
+            dashboard_path = registry.get_path(key)
+            if dashboard_path and Path(dashboard_path).exists():
+                logger.info(f"PathRegistryからパスを取得: {key} = {dashboard_path}")
+                return str(dashboard_path)
+    except Exception as e:
+        logger.error(f"PathRegistry読み込みエラー: {e}")
     
-    # 優先順位5: ユーザーホームディレクトリ
-    home_path = Path.home() / "ProjectManagerSuite" / "data" / "exports" / "dashboard.csv"
-    logger.info(f"ホームディレクトリからのパスを試行: {home_path}")
-    if home_path.exists():
-        logger.info(f"ホームディレクトリからのパスが存在します: {home_path}")
-        return str(home_path)
+    # 3. 固定のフォールバックパス
+    fallback_paths = [
+        Path(os.getcwd()) / "data" / "exports" / "dashboard.csv",
+        Path(os.getcwd()).parent / "data" / "exports" / "dashboard.csv",
+        Path(os.getcwd()) / "ProjectManager" / "data" / "exports" / "dashboard.csv"
+    ]
     
-    # フォールバック: もともとのハードコードされたパス
-    original_path = r'C:\Users\gbrai\Documents\Projects\app_Task_Management\ProjectManager\data\exports\dashboard.csv'
-    logger.warning(f"すべてのパス解決方法が失敗。ハードコードされたパスにフォールバック: {original_path}")
-    return original_path
+    for path in fallback_paths:
+        if path.exists():
+            logger.info(f"フォールバックパスが見つかりました: {path}")
+            return str(path)
+    
+    # 4. 最終フォールバック
+    logger.error("すべてのパス解決方法が失敗しました")
+    return "dashboard.csv"  # 相対パスとして最後の望み
 
-# ダッシュボード更新用のデータファイルパス（動的に解決）
+# 重要: グローバル変数として明示的に定義
 DASHBOARD_FILE_PATH = resolve_dashboard_path()
-logger.info(f"解決されたダッシュボードファイルパス: {DASHBOARD_FILE_PATH}")
 
 def register_callbacks(app):
     """

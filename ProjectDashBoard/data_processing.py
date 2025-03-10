@@ -33,101 +33,115 @@ def load_and_process_data(dashboard_file_path: str) -> pd.DataFrame:
         処理済みのデータフレーム
     """
     try:
-        # ★★★ 追加: 詳細なパス検証とエラーハンドリング ★★★
-        logger.info(f"ダッシュボードデータの読み込み開始: {dashboard_file_path}")
+        # 詳細情報のログ出力
+        logger.info(f"データ読み込み開始: {dashboard_file_path}")
+        logger.info(f"作業ディレクトリ: {os.getcwd()}")
         
-        # パスの存在確認
-        if not os.path.exists(dashboard_file_path):
-            logger.error(f"ダッシュボードファイルが見つかりません: {dashboard_file_path}")
-            
-            # 診断情報の記録
-            logger.error(f"現在の作業ディレクトリ: {os.getcwd()}")
-            logger.error(f"環境変数: PMSUITE_DASHBOARD_DATA_DIR={os.environ.get('PMSUITE_DASHBOARD_DATA_DIR', '未設定')}")
-            logger.error(f"環境変数: PMSUITE_DASHBOARD_FILE={os.environ.get('PMSUITE_DASHBOARD_FILE', '未設定')}")
-            
-            # PyInstaller環境の場合、追加情報を出力
-            if getattr(sys, 'frozen', False):
-                logger.error(f"PyInstaller MEIPASS: {sys._MEIPASS}")
-                logger.error(f"実行ファイルパス: {sys.executable}")
-            
-            # 検索した他のパスの情報も記録
-            for path_to_check in [
-                Path.cwd() / "data" / "exports" / "dashboard.csv",
-                Path.home() / "ProjectManagerSuite" / "data" / "exports" / "dashboard.csv"
-            ]:
-                logger.error(f"代替パスの存在確認: {path_to_check} - {'存在します' if path_to_check.exists() else '存在しません'}")
-            
-            # エラーメッセージ付きのデータフレームを返す
-            error_df = pd.DataFrame({
-                "error_message": [f"データファイルが見つかりません: {dashboard_file_path}"],
-                "additional_info": ["データの更新または再インストールをお試しください。"]
-            })
-            return error_df
-            
-        # ダッシュボードデータの読み込み
-        logger.info(f"ファイルの読み込み: {dashboard_file_path}")
+        # パス解決の二重確認
+        dashboard_path = Path(dashboard_file_path).resolve()
+        logger.info(f"解決されたパス: {dashboard_path}")
         
-        # CSV読み込みでエンコーディングを複数試す
+        # ファイル存在確認
+        if not dashboard_path.exists():
+            logger.error(f"ファイルが見つかりません: {dashboard_path}")
+            
+            # 代替パスを探索
+            alt_paths = [
+                Path(os.environ.get("PMSUITE_DASHBOARD_FILE", "")),
+                Path(os.environ.get("PMSUITE_DASHBOARD_DATA_DIR", "")) / "dashboard.csv",
+                Path(os.getcwd()) / "data" / "exports" / "dashboard.csv",
+                Path(os.getcwd()).parent / "data" / "exports" / "dashboard.csv"
+            ]
+            
+            for alt_path in alt_paths:
+                if alt_path.exists():
+                    logger.info(f"代替パスが見つかりました: {alt_path}")
+                    dashboard_path = alt_path
+                    break
+            else:
+                # 代替パスが見つからなかった場合
+                error_df = pd.DataFrame({
+                    "error_message": [f"データファイルが見つかりません: {dashboard_path}"],
+                    "additional_info": ["以下のパスも確認しましたが見つかりませんでした:"] + 
+                                      [f"- {p}" for p in alt_paths if str(p) != "."]
+                })
+                return error_df
+        
+        # ファイルの読み込み（複数エンコーディングを試行）
         df = None
-        for encoding in ['utf-8-sig', 'utf-8', 'cp932']:
+        errors = []
+        
+        for encoding in ['utf-8-sig', 'utf-8', 'cp932', 'shift-jis', 'latin1']:
             try:
-                df = pd.read_csv(dashboard_file_path, encoding=encoding)
-                logger.info(f"CSVを読み込みました (エンコーディング: {encoding})")
+                logger.info(f"エンコーディング {encoding} で読み込み試行")
+                df = pd.read_csv(dashboard_path, encoding=encoding)
+                logger.info(f"成功: {encoding} でCSVを読み込みました")
+                
+                # 列名を表示してデバッグ
+                logger.info(f"CSV列: {list(df.columns)}")
+                logger.info(f"行数: {len(df)}")
                 break
             except UnicodeDecodeError:
+                errors.append(f"{encoding}: UnicodeDecodeError")
                 continue
             except Exception as e:
-                logger.error(f"CSVの読み込みエラー ({encoding}): {e}")
+                error_msg = f"{encoding}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"CSVの読み込みエラー: {error_msg}")
         
         if df is None:
-            logger.error("すべてのエンコーディングで読み込みに失敗しました")
-            return pd.DataFrame({"error": ["CSVファイルの読み込みに失敗しました。ファイルが破損している可能性があります。"]})
+            logger.error(f"すべてのエンコーディングで読み込みに失敗: {errors}")
+            return pd.DataFrame({
+                "error": ["CSVファイルの読み込みに失敗しました。以下のエンコーディングを試しましたが失敗しました:"],
+                "details": ["\n".join(errors)]
+            })
         
-        # プロジェクトデータの読み込み
-        projects_file_path = dashboard_file_path.replace('dashboard.csv', 'projects.csv')
-        logger.info(f"プロジェクトデータを読み込み: {projects_file_path}")
+        # 成功したらプロジェクトデータも読み込み
+        projects_file_path = str(dashboard_path).replace('dashboard.csv', 'projects.csv')
+        logger.info(f"プロジェクトデータファイル: {projects_file_path}")
         
         if not os.path.exists(projects_file_path):
-            logger.error(f"プロジェクトデータファイルが見つかりません: {projects_file_path}")
+            logger.warning(f"プロジェクトデータファイルが見つかりません: {projects_file_path}")
+            # ダッシュボードデータのみ返す
             return df
             
-        projects_df = pd.read_csv(projects_file_path)
-        
-        # ganttchart_pathの存在確認
-        if 'ganttchart_path' not in projects_df.columns:
-            logger.error("ganttchart_path列がプロジェクトデータにありません")
-            return df
-
-        # パスの検証
-        from ProjectDashBoard.file_utils import validate_file_path
-        projects_df['ganttchart_path'] = projects_df['ganttchart_path'].apply(
-            lambda x: None if pd.isna(x) else validate_file_path(x)
-        )
-        
-        # データの結合
-        df = pd.merge(
-            df,
-            projects_df[['project_id', 'project_path', 'ganttchart_path']],
-            on='project_id',
-            how='left'
-        )
+        # プロジェクトデータの読み込み
+        try:
+            projects_df = pd.read_csv(projects_file_path, encoding=encoding)
+            logger.info(f"プロジェクトデータを読み込みました: {len(projects_df)}行")
+            
+            # ganttchart_pathの存在確認
+            if 'ganttchart_path' not in projects_df.columns:
+                logger.warning("ganttchart_path列がプロジェクトデータにありません")
+            
+            # データの結合
+            df = pd.merge(
+                df,
+                projects_df[['project_id', 'project_path', 'ganttchart_path']],
+                on='project_id',
+                how='left'
+            )
+        except Exception as e:
+            logger.error(f"プロジェクトデータの読み込みエラー: {e}")
         
         # 日付列の処理
         date_columns = ['task_start_date', 'task_finish_date', 'created_at']
         for col in date_columns:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
+                try:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                except Exception as e:
+                    logger.warning(f"{col}列の日付変換エラー: {e}")
             else:
                 logger.warning(f"列 {col} がCSVにありません")
         
-        logger.info(f"データの読み込み完了。合計行数: {len(df)}")
         return df
         
     except Exception as e:
-        logger.error(f"データ読み込みエラー: {str(e)}")
+        logger.error(f"データ読み込み総合エラー: {e}")
+        import traceback
         logger.error(traceback.format_exc())
-        # エラーメッセージを含む空のデータフレームを返す
-        return pd.DataFrame({"error": [f"データ読み込みエラー: {str(e)}"]})
+        return pd.DataFrame({"error": [f"データ読み込み処理中にエラーが発生しました: {str(e)}"]})
 
 
 def check_delays(df: pd.DataFrame) -> pd.DataFrame:
