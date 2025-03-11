@@ -23,6 +23,14 @@ class ConfigManager:
         """
         self.logger = LogManager().get_logger(__name__)
         
+        # PathRegistryを初期化
+        try:
+            from PathRegistry import PathRegistry
+            self.registry = PathRegistry.get_instance()
+        except ImportError:
+            self.registry = None
+            self.logger.warning("PathRegistryを読み込めませんでした")
+        
         # パッケージのルートディレクトリを取得
         self.package_root = Path(__file__).parent.parent
         
@@ -36,7 +44,16 @@ class ConfigManager:
         if config_file:
             self.config_file = Path(config_file)
         else:
-            self.config_file = self.package_root / "config" / "config.json"
+            # PathRegistryから設定ファイルパスを優先的に取得
+            if self.registry:
+                registry_path = self.registry.get_path("CPL_CONFIG_PATH")
+                if registry_path:
+                    self.config_file = Path(registry_path)
+                    self.logger.info(f"PathRegistryから設定ファイルパスを取得: {registry_path}")
+                else:
+                    self.config_file = self.package_root / "config" / "config.json"
+            else:
+                self.config_file = self.package_root / "config" / "config.json"
         
         # configフォルダがない場合は作成
         self.config_file.parent.mkdir(parents=True, exist_ok=True)

@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from tkinter import messagebox
 
+# PathRegistry をインポート
+from PathRegistry import PathRegistry, get_path, ensure_dir
+
 # アプリケーションのルートディレクトリを特定
 if getattr(sys, 'frozen', False):
     # PyInstallerで実行ファイル化した場合
@@ -101,10 +104,30 @@ def setup_environment() -> None:
     
     - ディレクトリ構造の確認と作成
     - 設定ファイルの確認
+    - PathRegistryの初期化と診断
     """
     try:
-        # ProjectManagerSuite環境の確認
-        ensure_directory(APP_ROOT / "logs")
+        # PathRegistryの初期化
+        registry = PathRegistry.get_instance()
+        
+        # 基本パスの登録
+        registry.register_path("ROOT", str(APP_ROOT))
+        registry.register_path("DATA_DIR", str(APP_ROOT / "data"))
+        registry.register_path("LOGS_DIR", str(APP_ROOT / "logs"))
+        registry.register_path("PROJECTMANAGER_DIR", str(APP_ROOT / "ProjectManager"))
+        registry.register_path("CREATEPROJECTLIST_DIR", str(APP_ROOT / "CreateProjectList"))
+        registry.register_path("PROJECTDASHBOARD_DIR", str(APP_ROOT / "ProjectDashBoard"))
+        
+        # 診断を実行して問題を検出
+        diagnosis = registry.diagnose()
+        if diagnosis['issues']:
+            logging.warning(f"{len(diagnosis['issues'])}件のパス問題を検出しました")
+            # 自動修復を試行
+            repair_result = registry.auto_repair(diagnosis['issues'])
+            logging.info(f"自動修復: {len(repair_result['repaired'])}件成功, {len(repair_result['failed'])}件失敗")
+        
+        # ディレクトリの作成
+        ensure_dir("LOGS_DIR")
                 
         # defaults.txtの確認
         defaults_path = APP_ROOT / "defaults.txt"
@@ -146,6 +169,14 @@ def initialize_app() -> Optional[DatabaseManager]:
     try:
         # 環境のセットアップ
         setup_environment()
+        
+        # アダプターの適用
+        try:
+            from ProjectManager.config_adapters import adapt_project_manager_config
+            adapt_project_manager_config()
+            logging.info("ProjectManager設定アダプターを適用しました")
+        except Exception as e:
+            logging.warning(f"設定アダプター適用エラー: {e}")
         
         # ディレクトリ構造の作成
         Config.setup_directories()

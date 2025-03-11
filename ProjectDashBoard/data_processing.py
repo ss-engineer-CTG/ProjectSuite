@@ -12,6 +12,9 @@ import pandas as pd
 import datetime
 import logging
 from typing import Optional, Tuple
+import sys
+import traceback
+from pathlib import Path
 from dash import html
 
 from ProjectDashBoard.config import COLORS
@@ -30,53 +33,115 @@ def load_and_process_data(dashboard_file_path: str) -> pd.DataFrame:
         処理済みのデータフレーム
     """
     try:
-        # ダッシュボードデータの読み込み
-        logger.info(f"Loading dashboard data from: {dashboard_file_path}")
-        df = pd.read_csv(dashboard_file_path)
+        # 詳細情報のログ出力
+        logger.info(f"データ読み込み開始: {dashboard_file_path}")
+        logger.info(f"作業ディレクトリ: {os.getcwd()}")
         
-        # プロジェクトデータの読み込み
-        projects_file_path = dashboard_file_path.replace('dashboard.csv', 'projects.csv')
-        logger.info(f"Loading projects data from: {projects_file_path}")
+        # パス解決の二重確認
+        dashboard_path = Path(dashboard_file_path).resolve()
+        logger.info(f"解決されたパス: {dashboard_path}")
+        
+        # ファイル存在確認
+        if not dashboard_path.exists():
+            logger.error(f"ファイルが見つかりません: {dashboard_path}")
+            
+            # 代替パスを探索
+            alt_paths = [
+                Path(os.environ.get("PMSUITE_DASHBOARD_FILE", "")),
+                Path(os.environ.get("PMSUITE_DASHBOARD_DATA_DIR", "")) / "dashboard.csv",
+                Path(os.getcwd()) / "data" / "exports" / "dashboard.csv",
+                Path(os.getcwd()).parent / "data" / "exports" / "dashboard.csv"
+            ]
+            
+            for alt_path in alt_paths:
+                if alt_path.exists():
+                    logger.info(f"代替パスが見つかりました: {alt_path}")
+                    dashboard_path = alt_path
+                    break
+            else:
+                # 代替パスが見つからなかった場合
+                error_df = pd.DataFrame({
+                    "error_message": [f"データファイルが見つかりません: {dashboard_path}"],
+                    "additional_info": ["以下のパスも確認しましたが見つかりませんでした:"] + 
+                                      [f"- {p}" for p in alt_paths if str(p) != "."]
+                })
+                return error_df
+        
+        # ファイルの読み込み（複数エンコーディングを試行）
+        df = None
+        errors = []
+        
+        for encoding in ['utf-8-sig', 'utf-8', 'cp932', 'shift-jis', 'latin1']:
+            try:
+                logger.info(f"エンコーディング {encoding} で読み込み試行")
+                df = pd.read_csv(dashboard_path, encoding=encoding)
+                logger.info(f"成功: {encoding} でCSVを読み込みました")
+                
+                # 列名を表示してデバッグ
+                logger.info(f"CSV列: {list(df.columns)}")
+                logger.info(f"行数: {len(df)}")
+                break
+            except UnicodeDecodeError:
+                errors.append(f"{encoding}: UnicodeDecodeError")
+                continue
+            except Exception as e:
+                error_msg = f"{encoding}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"CSVの読み込みエラー: {error_msg}")
+        
+        if df is None:
+            logger.error(f"すべてのエンコーディングで読み込みに失敗: {errors}")
+            return pd.DataFrame({
+                "error": ["CSVファイルの読み込みに失敗しました。以下のエンコーディングを試しましたが失敗しました:"],
+                "details": ["\n".join(errors)]
+            })
+        
+        # 成功したらプロジェクトデータも読み込み
+        projects_file_path = str(dashboard_path).replace('dashboard.csv', 'projects.csv')
+        logger.info(f"プロジェクトデータファイル: {projects_file_path}")
         
         if not os.path.exists(projects_file_path):
-            logger.error(f"Projects data file not found: {projects_file_path}")
+            logger.warning(f"プロジェクトデータファイルが見つかりません: {projects_file_path}")
+            # ダッシュボードデータのみ返す
             return df
             
-        projects_df = pd.read_csv(projects_file_path)
-        
-        # ganttchart_pathの存在確認
-        if 'ganttchart_path' not in projects_df.columns:
-            logger.error("ganttchart_path column not found in projects data")
-            return df
-
-        # パスの検証
-        from ProjectDashBoard.file_utils import validate_file_path
-        projects_df['ganttchart_path'] = projects_df['ganttchart_path'].apply(
-            lambda x: None if pd.isna(x) else validate_file_path(x)
-        )
-        
-        # データの結合
-        df = pd.merge(
-            df,
-            projects_df[['project_id', 'project_path', 'ganttchart_path']],
-            on='project_id',
-            how='left'
-        )
+        # プロジェクトデータの読み込み
+        try:
+            projects_df = pd.read_csv(projects_file_path, encoding=encoding)
+            logger.info(f"プロジェクトデータを読み込みました: {len(projects_df)}行")
+            
+            # ganttchart_pathの存在確認
+            if 'ganttchart_path' not in projects_df.columns:
+                logger.warning("ganttchart_path列がプロジェクトデータにありません")
+            
+            # データの結合
+            df = pd.merge(
+                df,
+                projects_df[['project_id', 'project_path', 'ganttchart_path']],
+                on='project_id',
+                how='left'
+            )
+        except Exception as e:
+            logger.error(f"プロジェクトデータの読み込みエラー: {e}")
         
         # 日付列の処理
         date_columns = ['task_start_date', 'task_finish_date', 'created_at']
         for col in date_columns:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
+                try:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                except Exception as e:
+                    logger.warning(f"{col}列の日付変換エラー: {e}")
             else:
-                logger.warning(f"Column {col} not found in CSV")
+                logger.warning(f"列 {col} がCSVにありません")
         
-        logger.info(f"Data loaded successfully. Total rows: {len(df)}")
         return df
         
     except Exception as e:
-        logger.error(f"Error loading data: {str(e)}")
-        return pd.DataFrame()
+        logger.error(f"データ読み込み総合エラー: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return pd.DataFrame({"error": [f"データ読み込み処理中にエラーが発生しました: {str(e)}"]})
 
 
 def check_delays(df: pd.DataFrame) -> pd.DataFrame:
@@ -122,6 +187,58 @@ def calculate_progress(df: pd.DataFrame) -> pd.DataFrame:
         プロジェクト進捗のデータフレーム
     """
     try:
+        # ★★★ 追加: 空のデータフレームまたはエラーメッセージを含むデータフレームのチェック ★★★
+        if df.empty:
+            logger.warning("空のデータフレームでの進捗計算が試行されました")
+            return pd.DataFrame(columns=[
+                'project_id', 'project_name', 'process', 'line',
+                'total_tasks', 'completed_tasks', 'milestone_count',
+                'start_date', 'end_date', 'project_path', 'ganttchart_path',
+                'progress', 'duration'
+            ])
+        
+        if 'error' in df.columns:
+            logger.warning("エラーメッセージを含むデータフレームでの進捗計算が試行されました")
+            # エラーデータフレームから最小限の進捗データフレームを生成
+            return pd.DataFrame({
+                'project_id': [0],
+                'project_name': ['エラー'],
+                'process': ['N/A'],
+                'line': ['N/A'],
+                'total_tasks': [0],
+                'completed_tasks': [0],
+                'milestone_count': [0],
+                'start_date': [datetime.datetime.now()],
+                'end_date': [datetime.datetime.now()],
+                'project_path': [''],
+                'ganttchart_path': [''],
+                'progress': [0],
+                'duration': [0]
+            })
+        
+        # 必要なカラムの存在確認
+        required_columns = ['project_id', 'project_name', 'task_id', 'task_status', 
+                           'task_start_date', 'task_finish_date']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"進捗計算に必要なカラムがありません: {missing_columns}")
+            return pd.DataFrame({
+                'project_id': [0],
+                'project_name': ['データエラー'],
+                'process': ['N/A'],
+                'line': ['N/A'],
+                'total_tasks': [0],
+                'completed_tasks': [0],
+                'milestone_count': [0],
+                'start_date': [datetime.datetime.now()],
+                'end_date': [datetime.datetime.now()],
+                'project_path': [''],
+                'ganttchart_path': [''],
+                'progress': [0],
+                'duration': [0]
+            })
+            
+        # 通常の進捗計算
         project_progress = df.groupby('project_id').agg({
             'project_name': 'first',
             'process': 'first',
@@ -140,6 +257,7 @@ def calculate_progress(df: pd.DataFrame) -> pd.DataFrame:
             'start_date', 'end_date', 'project_path', 'ganttchart_path'
         ]
         
+        # 進捗率と期間の計算
         project_progress['progress'] = (project_progress['completed_tasks'] / 
                                       project_progress['total_tasks'] * 100).round(2)
         project_progress['duration'] = (project_progress['end_date'] - 
@@ -147,8 +265,24 @@ def calculate_progress(df: pd.DataFrame) -> pd.DataFrame:
         
         return project_progress
     except Exception as e:
-        logger.error(f"Error calculating progress: {str(e)}")
-        return pd.DataFrame()
+        logger.error(f"進捗計算エラー: {str(e)}")
+        logger.error(traceback.format_exc())
+        # 最小限のデータフレームを返す
+        return pd.DataFrame({
+            'project_id': [0],
+            'project_name': ['計算エラー'],
+            'process': ['N/A'],
+            'line': ['N/A'],
+            'total_tasks': [0],
+            'completed_tasks': [0],
+            'milestone_count': [0],
+            'start_date': [datetime.datetime.now()],
+            'end_date': [datetime.datetime.now()],
+            'project_path': [''],
+            'ganttchart_path': [''],
+            'progress': [0],
+            'duration': [0]
+        })
 
 
 def get_status_color(progress: float, has_delay: bool) -> str:
@@ -309,7 +443,7 @@ def get_recent_tasks(df: pd.DataFrame, project_id: str) -> html.Div:
         return html.Div(content_elements, style={'fontSize': '0.9em'})
         
     except Exception as e:
-        logger.error(f"Error getting recent tasks for project {project_id}: {str(e)}")
+        logger.error(f"プロジェクト {project_id} の直近タスク取得エラー: {str(e)}")
         return html.Div(
             "データ取得エラー", 
             style={'color': COLORS['status']['danger'], 'fontStyle': 'italic'}

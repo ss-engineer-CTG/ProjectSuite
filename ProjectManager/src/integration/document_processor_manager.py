@@ -84,8 +84,13 @@ class DocumentProcessorManager:
 
             project_path = Path(project_data['project_path'])
             if not project_path.exists():
-                messagebox.showerror("エラー", "プロジェクトフォルダが存在しません。")
-                return None
+                try:
+                    # 出力フォルダがない場合は作成
+                    project_path.mkdir(parents=True, exist_ok=True)
+                    self.logger.info(f"プロジェクトフォルダを作成しました: {project_path}")
+                except Exception as e:
+                    messagebox.showerror("エラー", f"プロジェクトフォルダが存在せず、作成に失敗しました: {e}")
+                    return None
 
             # 新しいウィンドウの作成
             self.doc_processor_window = ctk.CTkToplevel(parent)
