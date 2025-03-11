@@ -35,20 +35,84 @@ app.layout = html.Div([
     # 更新ボタン（非表示）
     html.Button('更新', id='update-button', n_clicks=0, style={'display': 'none'}),
     
+    # ★★★ 追加: 初回ロード時に自動更新するためのInterval ★★★
+    dcc.Interval(
+        id='initial-update-interval',
+        interval=1000,  # 1秒後に発火
+        max_intervals=1  # 一度だけ発火
+    ),
+    
     # ダミー出力（コールバック用）
     html.Div(id='dummy-output', style={'display': 'none'}),
     
     # 通知コンテナ
     html.Div(id='notification-container'),
-    
+     
     # ヘッダー
     html.Div([
         html.Div([
-            html.H1('プロジェクト進捗ダッシュボード', 
-                   style={'color': COLORS['text']['primary']}),
-            html.P(id='update-time',
-                  style={'color': COLORS['text']['secondary']})
-        ], style=STYLES['container'])
+            # 左側：タイトルと更新時間
+            html.Div([
+                html.H1('プロジェクト進捗ダッシュボード', 
+                    style={'color': COLORS['text']['primary']}),
+                html.P(id='update-time',
+                    style={'color': COLORS['text']['secondary']})
+            ], style={'flex': '1'}),
+            
+            # 右側：ファイル選択と更新コントロール
+            html.Div([
+                # ファイルパスを保存するStore
+                dcc.Store(id='selected-file-path', storage_type='local'),
+                
+                # コントロールコンテナ
+                html.Div([
+                    # ファイル表示（小さく表示）
+                    html.Div(id='selected-file-display', style={
+                        'color': COLORS['text']['secondary'],
+                        'fontSize': '0.8em',
+                        'marginRight': '10px',
+                        'maxWidth': '300px',
+                        'overflow': 'hidden',
+                        'textOverflow': 'ellipsis',
+                        'whiteSpace': 'nowrap'
+                    }),
+                    
+                    # コンパクトなボタングループ
+                    html.Div([
+                        # 参照ボタン
+                        html.Button(
+                            '参照',
+                            id='select-file-button',
+                            style={
+                                'backgroundColor': 'transparent',
+                                'color': COLORS['text']['accent'],
+                                'padding': '6px 10px',
+                                'borderRadius': '4px',
+                                'border': f'1px solid {COLORS["text"]["accent"]}',
+                                'cursor': 'pointer',
+                                'fontSize': '0.8em',
+                                'marginRight': '5px'
+                            }
+                        ),
+                        # データ更新ボタン
+                        html.Button(
+                            '更新',
+                            id='refresh-data-button',
+                            n_clicks=0,
+                            style={
+                                'backgroundColor': COLORS['text']['accent'],
+                                'color': COLORS['surface'],
+                                'padding': '6px 10px',
+                                'borderRadius': '4px',
+                                'border': 'none',
+                                'cursor': 'pointer',
+                                'fontSize': '0.8em'
+                            }
+                        ),
+                    ], style={'display': 'flex', 'alignItems': 'center'})
+                ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'flex-end'})
+            ], style={'flex': '0 0 auto'})
+        ], style={**STYLES['container'], 'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center'})
     ], style={
         'backgroundColor': COLORS['surface'],
         'borderBottom': '1px solid rgba(255,255,255,0.1)',

@@ -94,6 +94,112 @@ def register_callbacks(app):
         app: Dashアプリケーションオブジェクト
     """
     
+    # ★★★ 修正: 初回ロード時の自動更新コールバック - prevent_initial_call=True を追加 ★★★
+    @app.callback(
+        Output('update-button', 'n_clicks', allow_duplicate=True),
+        [Input('initial-update-interval', 'n_intervals')],
+        prevent_initial_call=True  # この行を追加
+    )
+    def auto_update_on_load(n_intervals):
+        """
+        アプリケーションロード時に自動的にダッシュボードを更新する
+        
+        Args:
+            n_intervals: Intervalコンポーネントの発火回数
+            
+        Returns:
+            新しいクリック回数 (1)
+        """
+        if n_intervals is None or n_intervals < 1:
+            raise PreventUpdate
+            
+        logger.info("初回ロード時の自動更新を実行します")
+        # 1クリックとして扱い、更新処理をトリガー
+        return 1
+    
+    # ファイル選択ボタンのコールバック (新規追加)
+    @app.callback(
+        [Output('selected-file-path', 'data'),
+         Output('selected-file-display', 'children')],
+        [Input('select-file-button', 'n_clicks')],
+        [State('selected-file-path', 'data')]
+    )
+    def select_dashboard_file(n_clicks, current_path):
+        """
+        ダッシュボードファイルの選択ダイアログを表示
+        
+        Args:
+            n_clicks: ボタンのクリック回数
+            current_path: 現在選択されているファイルパス
+            
+        Returns:
+            選択されたファイルパスと表示用テキスト
+        """
+        ctx = callback_context
+        
+        # 初期表示時
+        if not ctx.triggered:
+            # 保存済みパスがあればそれを、なければデフォルトを使用
+            path_to_use = current_path if current_path and Path(current_path).exists() else DASHBOARD_FILE_PATH
+            return path_to_use, f"現在のファイル: {path_to_use}"
+        
+        if n_clicks is None or n_clicks == 0:
+            raise PreventUpdate
+        
+        try:
+            # tkinterを使用してファイル選択ダイアログを表示
+            from tkinter import Tk, filedialog
+            root = Tk()
+            root.withdraw()  # ルートウィンドウを表示しない
+            
+            # デフォルトディレクトリを設定
+            if current_path and Path(current_path).parent.exists():
+                initialdir = str(Path(current_path).parent)
+            else:
+                initialdir = os.getcwd()
+            
+            # ファイル選択ダイアログを表示
+            file_path = filedialog.askopenfilename(
+                initialdir=initialdir,
+                title="ダッシュボードCSVファイルの選択",
+                filetypes=(("CSV files", "*.csv"), ("All files", "*.*"))
+            )
+            
+            # キャンセルされた場合、現在のパスを維持
+            if not file_path:
+                return current_path, f"現在のファイル: {current_path}"
+                
+            # 選択されたファイルパスを返す
+            return file_path, f"現在のファイル: {file_path}"
+            
+        except Exception as e:
+            logger.error(f"ファイル選択エラー: {str(e)}")
+            # エラー時は現在のパスを維持
+            return current_path, f"現在のファイル: {current_path} (エラー: {str(e)})"
+    
+    # データ更新ボタンのコールバック (新規追加)
+    @app.callback(
+        Output('update-button', 'n_clicks'),
+        [Input('refresh-data-button', 'n_clicks')],
+        [State('update-button', 'n_clicks')]
+    )
+    def trigger_update(refresh_clicks, current_clicks):
+        """
+        データ更新ボタンがクリックされたときに隠しボタンのクリックをトリガー
+        
+        Args:
+            refresh_clicks: 更新ボタンのクリック回数
+            current_clicks: 現在の隠しボタンのクリック回数
+            
+        Returns:
+            新しいクリック回数
+        """
+        if refresh_clicks is None or refresh_clicks == 0:
+            raise PreventUpdate
+            
+        # データ更新ボタンがクリックされたら、隠しボタンのクリック数を増やして更新
+        return (current_clicks or 0) + 1
+    
     @app.callback(
         [Output('total-projects', 'children'),
         Output('active-projects', 'children'),
@@ -103,21 +209,47 @@ def register_callbacks(app):
         Output('progress-distribution', 'figure'),
         Output('duration-distribution', 'figure'),
         Output('update-time', 'children')],
-        [Input('update-button', 'n_clicks')]
+        [Input('update-button', 'n_clicks')],
+        [State('selected-file-path', 'data')]  # 新たにselected-file-pathを受け取る
     )
-    def update_dashboard(n_clicks):
+    def update_dashboard(n_clicks, selected_file_path):
         """
         ダッシュボードの更新処理
         
         Args:
             n_clicks: 更新ボタンのクリック回数
+            selected_file_path: 選択されたファイルパス
             
         Returns:
             更新された値のタプル
         """
         try:
+            # 選択されたファイルパスがない場合はデフォルトを使用
+            file_path = selected_file_path if selected_file_path else DASHBOARD_FILE_PATH
+            
+            # ファイルの存在確認
+            if not Path(file_path).exists():
+                logger.warning(f"選択されたファイルが存在しません: {file_path}, デフォルトを使用します")
+                file_path = DASHBOARD_FILE_PATH
+                
+                # デフォルトも存在しない場合
+                if not Path(DASHBOARD_FILE_PATH).exists():
+                    logger.error(f"デフォルトファイルも存在しません: {DASHBOARD_FILE_PATH}")
+                    return (
+                        '0', '0', '0', '0',
+                        html.Div([
+                            html.P('データファイルが見つかりません', style={'color': COLORS['status']['danger']}),
+                            html.P(f"パス: {file_path}", style={'color': COLORS['status']['danger'], 'fontSize': '0.8em'})
+                        ]),
+                        go.Figure(),
+                        go.Figure(),
+                        datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    )
+            
+            logger.info(f"更新処理: ファイルパス = {file_path}")
+            
             # データの読み込みと処理
-            df = load_and_process_data(DASHBOARD_FILE_PATH)
+            df = load_and_process_data(file_path)
             progress_data = calculate_progress(df)
             
             # 統計の計算
@@ -148,10 +280,15 @@ def register_callbacks(app):
         
         except Exception as e:
             logger.error(f"Error updating dashboard: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             # エラー時のフォールバック値を返す
             return (
                 '0', '0', '0', '0',
-                html.Div('データの読み込みに失敗しました', style={'color': COLORS['status']['danger']}),
+                html.Div([
+                    html.P('データの読み込みに失敗しました', style={'color': COLORS['status']['danger']}),
+                    html.P(f"エラー: {str(e)}", style={'color': COLORS['status']['danger'], 'fontSize': '0.8em'})
+                ]),
                 go.Figure(),
                 go.Figure(),
                 datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')

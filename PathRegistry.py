@@ -1,29 +1,28 @@
 """
-Self-Healing PathRegistry - パス解決に診断・修復機能を追加した拡張版
+Self-Healing PathRegistry - 統合版パス解決モジュール
+各アプリケーション（ProjectManager, CreateProjectList, ProjectDashBoard）で共通利用
 """
 import os
 import sys
-from pathlib import Path
-import json
 import logging
+import json
 import shutil
 from datetime import datetime
 import traceback
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any, Set
 
 # ロガーの設定
 logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
 
 class PathRegistry:
+    """パス解決とディレクトリ管理のための統合レジストリ"""
+    
     # シングルトンインスタンス
     _instance = None
     
     # パス情報を保持する辞書
-    _paths = {}
+    _paths: Dict[str, str] = {}
     
     # パス設定ファイル名
     CONFIG_FILE = "path_registry.json"
@@ -48,9 +47,11 @@ class PathRegistry:
         
         # 基本ディレクトリの特定
         if self.is_frozen:
+            # PyInstallerで実行ファイル化した場合
             self.root_dir = Path(sys._MEIPASS).parent
         else:
-            self.root_dir = Path(__file__).parent
+            # 通常実行時は現在のスクリプトの位置から判断
+            self.root_dir = self._find_project_root()
         
         # 初期パスの設定
         self._setup_base_paths()
@@ -63,16 +64,55 @@ class PathRegistry:
         
         logger.info(f"PathRegistry initialized with root: {self.root_dir}")
     
+    def _find_project_root(self) -> Path:
+        """プロジェクトルートディレクトリを探索"""
+        # 現在のスクリプトの位置
+        current_path = Path(__file__).resolve().parent
+        
+        # ルートを特定するためのマーカーファイル
+        root_markers = [
+            "ProjectManagerSuite.spec",
+            "build.py",
+            "launcher.py"
+        ]
+        
+        # 上位ディレクトリを探索
+        for i in range(5):  # 最大5階層まで探索
+            # マーカーファイルが存在するか確認
+            for marker in root_markers:
+                if (current_path / marker).exists():
+                    return current_path
+            
+            # ProjectManagerSuiteディレクトリかどうか確認
+            if current_path.name == "ProjectManagerSuite":
+                return current_path
+                
+            # 各アプリケーションのルートディレクトリかどうか確認
+            app_dirs = ["ProjectManager", "CreateProjectList", "ProjectDashBoard"]
+            if current_path.name in app_dirs:
+                return current_path.parent
+            
+            # 親ディレクトリに移動
+            parent = current_path.parent
+            if parent == current_path:  # ルートに到達した場合
+                break
+            current_path = parent
+        
+        # 見つからない場合は現在のディレクトリを使用
+        return Path.cwd()
+    
     def _setup_base_paths(self):
         """基本パスの設定"""
         # 共通ディレクトリ構造
         self._paths.update({
             "ROOT": str(self.root_dir),
             "DATA_DIR": str(self.root_dir / "data"),
-            "PROJECTS_DIR": str(self.root_dir / "data" / "projects"),
-            "TEMPLATES_DIR": str(self.root_dir / "data" / "templates"),
-            "EXPORTS_DIR": str(self.root_dir / "data" / "exports"),
             "LOGS_DIR": str(self.root_dir / "logs"),
+            "EXPORTS_DIR": str(self.root_dir / "data" / "exports"),
+            "TEMPLATES_DIR": str(self.root_dir / "data" / "templates"),
+            "PROJECTS_DIR": str(self.root_dir / "data" / "projects"),
+            "MASTER_DIR": str(self.root_dir / "data" / "master"),
+            "TEMP_DIR": str(self.root_dir / "data" / "temp"),
             "DB_PATH": str(self.root_dir / "data" / "projects.db"),
             "DASHBOARD_FILE": str(self.root_dir / "data" / "exports" / "dashboard.csv"),
             "PROJECTS_FILE": str(self.root_dir / "data" / "exports" / "projects.csv"),
@@ -125,7 +165,7 @@ class PathRegistry:
                 self._paths[path_key] = os.environ[env_var]
                 logger.info(f"Path overridden from special environment variable: {path_key}={os.environ[env_var]}")
     
-    def get_path(self, key, default=None):
+    def get_path(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """
         パスを取得し、問題があれば自動修復を試みる
         
@@ -154,7 +194,7 @@ class PathRegistry:
                     logger.error(f"自動修復失敗: {key} ({path}): {e}")
             
             # ファイルの場合は親ディレクトリの作成を試みる
-            elif key.endswith('_FILE') or key.endswith('_PATH'):
+            elif key.endswith(('_FILE', '_PATH')):
                 try:
                     path_obj.parent.mkdir(parents=True, exist_ok=True)
                     logger.info(f"自動修復: {key} の親ディレクトリを作成しました: {path_obj.parent}")
@@ -171,7 +211,7 @@ class PathRegistry:
         
         return path
     
-    def _find_alternative(self, key, original_path):
+    def _find_alternative(self, key: str, original_path: str) -> Optional[Path]:
         """
         欠落しているパスの代替を探索
         
@@ -245,7 +285,7 @@ class PathRegistry:
             
         return None
     
-    def register_path(self, key, path):
+    def register_path(self, key: str, path: str) -> None:
         """
         新しいパスを登録
         
@@ -256,7 +296,7 @@ class PathRegistry:
         self._paths[key.upper()] = str(path)
         logger.info(f"Registered path: {key}={path}")
     
-    def ensure_directory(self, key):
+    def ensure_directory(self, key: str) -> Optional[str]:
         """
         指定されたパスのディレクトリを確保
         
@@ -275,25 +315,7 @@ class PathRegistry:
             return str(directory)
         return None
     
-    def resolve_app_path(self, app_name, *parts):
-        """
-        アプリ固有のパスを解決
-        
-        Args:
-            app_name: アプリケーション名
-            *parts: パスの構成要素
-            
-        Returns:
-            str: 解決されたパス
-        """
-        app_dir = self.get_path(f"{app_name.upper()}_DIR")
-        if not app_dir:
-            logger.error(f"Application directory not found: {app_name}")
-            return None
-        
-        return str(Path(app_dir).joinpath(*parts))
-    
-    def diagnose(self):
+    def diagnose(self) -> Dict[str, Any]:
         """
         パス設定の健全性診断を実行し、問題点と解決策を提案
         
@@ -391,7 +413,7 @@ class PathRegistry:
         
         return report
     
-    def auto_repair(self, issues=None):
+    def auto_repair(self, issues=None) -> Dict[str, List]:
         """
         診断で見つかった問題を自動修復
         
@@ -441,7 +463,7 @@ class PathRegistry:
             "failed": failed
         }
     
-    def export_config(self, path=None):
+    def export_config(self, path=None) -> bool:
         """
         現在のパス設定をファイルにエクスポート
         
@@ -463,7 +485,7 @@ class PathRegistry:
             logger.error(f"Failed to export path configuration: {e}")
             return False
     
-    def get_all_paths(self):
+    def get_all_paths(self) -> Dict[str, str]:
         """
         全パス情報を取得
         
@@ -471,103 +493,12 @@ class PathRegistry:
             dict: 全パス情報
         """
         return dict(self._paths)
-    
-    def create_report(self, format="text"):
-        """
-        現在のパス設定とその状態のレポートを生成
-        
-        Args:
-            format: 出力形式 ("text", "json", "html")
-            
-        Returns:
-            str: レポート
-        """
-        # 診断を実行
-        diagnosis = self.diagnose()
-        
-        if format == "json":
-            return json.dumps({
-                "paths": self._paths,
-                "diagnosis": diagnosis
-            }, indent=2)
-            
-        elif format == "html":
-            # HTMLレポートを生成
-            html = ["<html><head><style>",
-                   "body { font-family: Arial; margin: 20px; }",
-                   "table { border-collapse: collapse; width: 100%; }",
-                   "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }",
-                   "th { background-color: #f2f2f2; }",
-                   "tr:nth-child(even) { background-color: #f9f9f9; }",
-                   ".error { color: red; }",
-                   ".warning { color: orange; }",
-                   ".ok { color: green; }",
-                   "</style></head><body>",
-                   "<h1>PathRegistry レポート</h1>"]
-            
-            # パステーブル
-            html.append("<h2>登録パス</h2>")
-            html.append("<table><tr><th>キー</th><th>パス</th><th>状態</th></tr>")
-            
-            for key, path in self._paths.items():
-                path_obj = Path(path)
-                if path_obj.exists():
-                    status = "<span class='ok'>OK</span>"
-                else:
-                    status = "<span class='error'>未検出</span>"
-                
-                html.append(f"<tr><td>{key}</td><td>{path}</td><td>{status}</td></tr>")
-            
-            html.append("</table>")
-            
-            # 診断結果
-            if diagnosis["issues"]:
-                html.append("<h2>診断結果</h2>")
-                html.append("<table><tr><th>キー</th><th>問題</th><th>解決策</th><th>重要度</th></tr>")
-                
-                for issue in diagnosis["issues"]:
-                    severity_class = "error" if issue["severity"] == "high" else "warning"
-                    html.append(f"<tr><td>{issue['key']}</td><td>{issue['type']}</td>"
-                              f"<td>{issue['solution']}</td>"
-                              f"<td class='{severity_class}'>{issue['severity']}</td></tr>")
-                
-                html.append("</table>")
-            else:
-                html.append("<h2>診断結果: 問題なし</h2>")
-            
-            html.append("</body></html>")
-            return "".join(html)
-            
-        else:  # text format
-            lines = ["PathRegistry レポート", "=" * 30, ""]
-            
-            # パス一覧
-            lines.append("登録パス:")
-            for key, path in self._paths.items():
-                path_obj = Path(path)
-                status = "OK" if path_obj.exists() else "未検出"
-                lines.append(f"  {key}: {path} ({status})")
-            
-            lines.append("")
-            
-            # 診断結果
-            if diagnosis["issues"]:
-                lines.append("診断結果:")
-                for issue in diagnosis["issues"]:
-                    lines.append(f"  {issue['key']} ({issue['severity']}):")
-                    lines.append(f"    問題: {issue['type']}")
-                    lines.append(f"    解決策: {issue['solution']}")
-            else:
-                lines.append("診断結果: 問題なし")
-            
-            return "\n".join(lines)
 
-
-# シンプルなアクセス関数
-def get_path(key, default=None):
+# 簡易アクセス関数
+def get_path(key: str, default: Optional[str] = None) -> Optional[str]:
     """パスを取得する簡易関数"""
     return PathRegistry.get_instance().get_path(key, default)
 
-def ensure_dir(key):
+def ensure_dir(key: str) -> Optional[str]:
     """ディレクトリを確保する簡易関数"""
     return PathRegistry.get_instance().ensure_directory(key)
