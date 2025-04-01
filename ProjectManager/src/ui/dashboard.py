@@ -2,11 +2,11 @@
 
 import customtkinter as ctk
 import tkinter as tk
-from datetime import datetime
+from tkinter import messagebox
 import logging
 import traceback
 from typing import Optional, Dict, Any
-from tkinter import messagebox
+from datetime import datetime
 
 from ProjectManager.src.ui.project.quick_form import QuickProjectForm
 from ProjectManager.src.ui.project.detail_form import DetailProjectForm
@@ -15,7 +15,7 @@ from ProjectManager.src.services.gantt_updater import GanttChartUpdater
 from ProjectManager.src.services.task_loader import TaskLoader
 from ProjectManager.src.ui.styles.color_scheme import ColorScheme
 from ProjectManager.src.integration.document_processor_manager import DocumentProcessorManager
-from ProjectManager.src.integration.dashboard_connector import DashboardConnector
+# dashboard_connector import の削除
 from CreateProjectList.gui.main_window.document_processor_gui import DocumentProcessorGUI
 
 class DashboardGUI:
@@ -41,8 +41,7 @@ class DashboardGUI:
         # ドキュメント処理マネージャー
         self.doc_processor_manager = None
         
-        # ダッシュボードコネクタの初期化
-        self.dashboard_connector = DashboardConnector(self.db_manager)
+        # dashboard_connector 初期化部分を削除
         
         # フォント設定
         self.default_font = ("Meiryo", 12)
@@ -177,31 +176,7 @@ class DashboardGUI:
         )
         update_button.pack(side="left", padx=(0, 10))
         
-        # ダッシュボード表示ボタン
-        dashboard_button = ctk.CTkButton(
-            filter_frame,
-            text="ダッシュボード表示",
-            command=self.show_dashboard,
-            font=self.default_font,
-            fg_color=self.colors.BUTTON_PRIMARY,
-            text_color=self.colors.BUTTON_TEXT,
-            hover_color=self.colors.BUTTON_HOVER,
-            width=150
-        )
-        dashboard_button.pack(side="left", padx=(0, 10))
-        
-        # ダッシュボード終了ボタン（追加）
-        dashboard_close_button = ctk.CTkButton(
-            filter_frame,
-            text="ダッシュボード終了",
-            command=self.close_dashboard,
-            font=self.default_font,
-            fg_color=self.colors.BUTTON_DANGER,
-            text_color=self.colors.TEXT_PRIMARY,
-            hover_color='#CC2F26',
-            width=150
-        )
-        dashboard_close_button.pack(side="left", padx=(0, 10))
+        # ダッシュボード表示・終了ボタンを削除
         
         # ドキュメント処理ボタン
         doc_process_button = ctk.CTkButton(
@@ -282,23 +257,9 @@ class DashboardGUI:
 
         self.main_frame = main_frame
 
-    def show_dashboard(self):
-        """ダッシュボードを表示する"""
-        try:
-            self.dashboard_connector.launch_dashboard()
-        except Exception as e:
-            logging.error(f"ダッシュボード起動エラー: {e}\n{traceback.format_exc()}")
-            messagebox.showerror("エラー", f"ダッシュボードの起動に失敗しました：{str(e)}")
+    # show_dashboard メソッドを削除
     
-    def close_dashboard(self):
-        """ダッシュボードを明示的に閉じる"""
-        try:
-            if hasattr(self, 'dashboard_connector'):
-                self.dashboard_connector.shutdown_dashboard()
-                messagebox.showinfo("成功", "ダッシュボードを終了しました")
-        except Exception as e:
-            logging.error(f"ダッシュボード終了エラー: {e}")
-            messagebox.showerror("エラー", "ダッシュボードの終了に失敗しました")
+    # close_dashboard メソッドを削除
 
     def create_project_card(self, project):
         """
@@ -587,9 +548,7 @@ class DashboardGUI:
         """プロジェクト作成後のコールバック"""
         self.refresh_projects()
         
-        # ダッシュボードデータも更新
-        if hasattr(self, 'dashboard_connector'):
-            self.dashboard_connector.refresh_dashboard()
+        # ダッシュボードデータの更新コード削除
             
         if self.project_dialog:
             self.project_dialog.window.destroy()
@@ -599,9 +558,7 @@ class DashboardGUI:
         """プロジェクト更新後のコールバック"""
         self.refresh_projects()
         
-        # ダッシュボードデータも更新
-        if hasattr(self, 'dashboard_connector'):
-            self.dashboard_connector.refresh_dashboard()
+        # ダッシュボードデータの更新コード削除
             
         if self.project_dialog:
             self.project_dialog.window.destroy()
@@ -623,9 +580,7 @@ class DashboardGUI:
                 else:
                     self.refresh_projects()
                 
-                # ダッシュボードデータも更新
-                if hasattr(self, 'dashboard_connector'):
-                    self.dashboard_connector.refresh_dashboard()
+                # ダッシュボードデータの更新コード削除
                     
                 messagebox.showinfo("成功", "プロジェクトを削除しました。")
             except Exception as e:
@@ -663,13 +618,7 @@ class DashboardGUI:
             updater = GanttChartUpdater(self.db_manager)
             stats = updater.update_ganttchart_paths()
             
-            # 4. ダッシュボードの更新とエクスポート
-            logging.info("ダッシュボードの更新を開始します")
-            self.db_manager.update_dashboard()
-            
-            # ダッシュボードビューの更新
-            if hasattr(self, 'dashboard_connector'):
-                self.dashboard_connector.refresh_dashboard()
+            # ダッシュボード更新部分を削除
             
             # 結果メッセージの作成
             message = (
@@ -681,10 +630,6 @@ class DashboardGUI:
                 f"   - 更新成功: {stats['updated']}\n"
                 f"   - 未検出: {stats['not_found']}\n"
                 f"   - エラー: {stats['error']}\n"
-                f"4. ダッシュボード更新: 完了\n"
-                f"5. データエクスポート:\n"
-                f"   - ダッシュボードデータ: 完了\n"
-                f"   - プロジェクトデータ: 完了"
             )
             
             # 結果表示
@@ -707,13 +652,7 @@ class DashboardGUI:
             logging.debug("アプリケーション終了処理を開始")
             self.is_closing = True
             
-            # ダッシュボードの確実な終了
-            if hasattr(self, 'dashboard_connector'):
-                try:
-                    self.dashboard_connector.shutdown_dashboard()
-                    logging.info("ダッシュボードを終了しました")
-                except Exception as e:
-                    logging.error(f"ダッシュボード終了中にエラー: {e}")
+            # ダッシュボード終了処理を削除
             
             # ドキュメント処理マネージャーのクリーンアップ
             if self.doc_processor_manager:

@@ -1,6 +1,6 @@
 """
 ProjectManagerSuiteのメインエントリーポイント
-ProjectManagerを中心に他のアプリケーション(CreateProjectList, ProjectDashBoard)を統合管理
+ProjectManagerを中心に他のアプリケーション(CreateProjectList)を統合管理
 """
 
 import os
@@ -116,7 +116,7 @@ def setup_environment() -> None:
         registry.register_path("LOGS_DIR", str(APP_ROOT / "logs"))
         registry.register_path("PROJECTMANAGER_DIR", str(APP_ROOT / "ProjectManager"))
         registry.register_path("CREATEPROJECTLIST_DIR", str(APP_ROOT / "CreateProjectList"))
-        registry.register_path("PROJECTDASHBOARD_DIR", str(APP_ROOT / "ProjectDashBoard"))
+        # ProjectDashBoardパスの登録を削除
         
         # 診断を実行して問題を検出
         diagnosis = registry.diagnose()
@@ -243,11 +243,8 @@ def run_standalone_app(app_name: str, *args) -> int:
         "CreateProjectList": {
             "module": "CreateProjectList.main.document_processor_main",
             "main_func": "main"
-        },
-        "ProjectDashBoard": {
-            "module": "ProjectDashBoard.app",
-            "main_func": None  # app.pyを直接実行
         }
+        # "ProjectDashBoard" エントリを削除
     }
     
     try:
@@ -266,55 +263,19 @@ def run_standalone_app(app_name: str, *args) -> int:
         
         # ファイルを直接実行
         elif app_info["module"] and not app_info["main_func"]:
-            # ProjectDashBoardの特別処理
-            if app_name == "ProjectDashBoard":
-                try:
-                    # PyInstaller環境の場合
-                    if getattr(sys, 'frozen', False):
-                        print("PyInstaller環境でDashboardを起動")
-                        # Dashboardモジュールを直接インポート
-                        import ProjectDashBoard.app as dashboard
-                        # Dashboardサーバーを起動（デバッグモードオフ）
-                        dashboard.app.run_server(
-                            debug=False,
-                            port=8050,
-                            host='127.0.0.1',
-                            use_reloader=False
-                        )
-                        return 0
-                    else:
-                        # 開発環境の場合は通常の実行
-                        import subprocess
-                        
-                        module_path = app_info["module"].replace(".", os.path.sep) + ".py"
-                        full_path = APP_ROOT / module_path
-                        
-                        # サブプロセスとして実行
-                        process = subprocess.Popen(
-                            [sys.executable, str(full_path)] + list(args),
-                            env=os.environ.copy()
-                        )
-                        
-                        # このプロセスはメインプロセスの終了を待たず独立して実行
-                        return 0
-                except Exception as e:
-                    print(f"Dashboard実行エラー: {e}\n{traceback.format_exc()}")
-                    return 1
-            else:
-                # 他のアプリケーションの通常処理
-                import subprocess
-                
-                module_path = app_info["module"].replace(".", os.path.sep) + ".py"
-                full_path = APP_ROOT / module_path
-                
-                # サブプロセスとして実行
-                process = subprocess.Popen(
-                    [sys.executable, str(full_path)] + list(args),
-                    env=os.environ.copy()
-                )
-                
-                # このプロセスはメインプロセスの終了を待たず独立して実行
-                return 0
+            import subprocess
+            
+            module_path = app_info["module"].replace(".", os.path.sep) + ".py"
+            full_path = APP_ROOT / module_path
+            
+            # サブプロセスとして実行
+            process = subprocess.Popen(
+                [sys.executable, str(full_path)] + list(args),
+                env=os.environ.copy()
+            )
+            
+            # このプロセスはメインプロセスの終了を待たず独立して実行
+            return 0
             
         else:
             print(f"アプリケーション{app_name}の起動方法が定義されていません")
