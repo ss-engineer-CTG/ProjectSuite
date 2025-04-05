@@ -53,6 +53,29 @@ class PathRegistry:
             # 通常実行時は現在のスクリプトの位置から判断
             self.root_dir = self._find_project_root()
         
+        # ユーザードキュメントのProjectSuiteディレクトリを設定
+        self.user_data_dir = Path.home() / "Documents" / "ProjectSuite"
+        
+        # データディレクトリの設定
+        if self.user_data_dir.exists():
+            # 既に存在する場合はそれを使用
+            self.data_dir = self.user_data_dir
+            logger.info(f"ユーザードキュメントのデータディレクトリを使用: {self.data_dir}")
+        else:
+            # 存在しない場合は作成してデータをコピー
+            try:
+                self.data_dir = self.user_data_dir
+                self.data_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"ユーザードキュメントに新しいデータディレクトリを作成: {self.data_dir}")
+                
+                # 初回起動時のデータコピー
+                self._initialize_user_data_directory()
+            except Exception as e:
+                # エラーが発生した場合はアプリケーションディレクトリを使用
+                logger.error(f"ユーザードキュメントディレクトリ作成エラー: {e}")
+                self.data_dir = self.root_dir / "data"
+                logger.info(f"アプリケーションのデータディレクトリにフォールバック: {self.data_dir}")
+        
         # 初期パスの設定
         self._setup_base_paths()
         
@@ -62,7 +85,39 @@ class PathRegistry:
         # 環境変数からパスをオーバーライド
         self._override_from_env()
         
-        logger.info(f"PathRegistry initialized with root: {self.root_dir}")
+        logger.info(f"PathRegistry initialized with root: {self.root_dir}, data: {self.data_dir}")
+    
+    def _initialize_user_data_directory(self):
+        """初回起動時にデータをユーザードキュメントフォルダにコピー"""
+        # アプリケーションデータディレクトリ
+        app_data_dir = self.root_dir / "data"
+        
+        if app_data_dir.exists():
+            logger.info(f"データをコピーします: {app_data_dir} -> {self.data_dir}")
+            
+            # サブディレクトリを作成してコピー
+            for subdir in ["exports", "master", "projects", "templates", "temp"]:
+                src_dir = app_data_dir / subdir
+                dst_dir = self.data_dir / subdir
+                
+                if src_dir.exists():
+                    dst_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # ディレクトリ内のファイルをコピー
+                    for item in src_dir.rglob("*"):
+                        if item.is_file():
+                            relative_path = item.relative_to(src_dir)
+                            target_path = dst_dir / relative_path
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(item, target_path)
+                            logger.debug(f"ファイルをコピー: {item} -> {target_path}")
+        else:
+            logger.warning(f"アプリケーションデータディレクトリが見つかりません: {app_data_dir}")
+            
+            # 基本ディレクトリ構造だけ作成
+            for subdir in ["exports", "master", "projects", "templates", "temp"]:
+                (self.data_dir / subdir).mkdir(parents=True, exist_ok=True)
+                logger.debug(f"空のディレクトリを作成: {self.data_dir / subdir}")
     
     def _find_project_root(self) -> Path:
         """プロジェクトルートディレクトリを探索"""
@@ -106,16 +161,16 @@ class PathRegistry:
         # 共通ディレクトリ構造
         self._paths.update({
             "ROOT": str(self.root_dir),
-            "DATA_DIR": str(self.root_dir / "data"),
+            "DATA_DIR": str(self.data_dir),
             "LOGS_DIR": str(self.root_dir / "logs"),
-            "EXPORTS_DIR": str(self.root_dir / "data" / "exports"),
-            "TEMPLATES_DIR": str(self.root_dir / "data" / "templates"),
-            "PROJECTS_DIR": str(self.root_dir / "data" / "projects"),
-            "MASTER_DIR": str(self.root_dir / "data" / "master"),
-            "TEMP_DIR": str(self.root_dir / "data" / "temp"),
-            "DB_PATH": str(self.root_dir / "data" / "projects.db"),
-            "DASHBOARD_FILE": str(self.root_dir / "data" / "exports" / "dashboard.csv"),
-            "PROJECTS_FILE": str(self.root_dir / "data" / "exports" / "projects.csv"),
+            "EXPORTS_DIR": str(self.data_dir / "exports"),
+            "TEMPLATES_DIR": str(self.data_dir / "templates"),
+            "PROJECTS_DIR": str(self.data_dir / "projects"),
+            "MASTER_DIR": str(self.data_dir / "master"),
+            "TEMP_DIR": str(self.data_dir / "temp"),
+            "DB_PATH": str(self.data_dir / "projects.db"),
+            "DASHBOARD_FILE": str(self.data_dir / "exports" / "dashboard.csv"),
+            "PROJECTS_FILE": str(self.data_dir / "exports" / "projects.csv"),
         })
         
         # 各アプリのパス
@@ -126,6 +181,7 @@ class PathRegistry:
         """設定ファイルからパス情報を読み込む"""
         # 複数の可能性のある場所を検索
         config_locations = [
+            self.data_dir / self.CONFIG_FILE,  # ユーザードキュメントのフォルダ
             self.root_dir / self.CONFIG_FILE,
             self.root_dir / "config" / self.CONFIG_FILE,
             Path.home() / "ProjectManagerSuite" / self.CONFIG_FILE
@@ -261,7 +317,8 @@ class PathRegistry:
             # 3. 共通のフォールバックディレクトリをチェック
             fallback_locations = [
                 self.root_dir,
-                self.root_dir / "data",
+                self.data_dir,
+                Path.home() / "Documents" / "ProjectSuite",
                 Path.home() / "ProjectManagerSuite",
                 Path.home() / "Documents" / "ProjectManagerSuite"
             ]
@@ -474,9 +531,12 @@ class PathRegistry:
             bool: 成功したらTrue
         """
         if path is None:
-            path = self.root_dir / self.CONFIG_FILE
+            path = self.data_dir / self.CONFIG_FILE
         
         try:
+            # 親ディレクトリが存在しない場合は作成
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(self._paths, f, indent=2, ensure_ascii=False)
                 logger.info(f"Exported path configuration to {path}")
