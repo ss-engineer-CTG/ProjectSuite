@@ -18,18 +18,23 @@ class Config:
         # 通常のPython実行の場合
         ROOT_DIR = Path(__file__).parent.parent.parent
     
-    # データディレクトリ
-    DATA_DIR = ROOT_DIR
+    # ユーザードキュメントディレクトリのパス
+    USER_DOC_DIR = Path.home() / "Documents" / "ProjectSuite"
+    
+    # データディレクトリ（ユーザードキュメントを優先）
+    DATA_DIR = USER_DOC_DIR
     
     # プロジェクトルートパスを定義（柔軟に対応）
     PROJECT_ROOT = ROOT_DIR
     
     # デフォルト値設定ファイルのパス（検索順）
-    # 1. アプリケーションディレクトリ直下
-    # 2. dataフォルダ内
-    # 3. configフォルダ内
-    # 4. ユーザーホームディレクトリ
+    # 1. ユーザードキュメントフォルダ内
+    # 2. アプリケーションディレクトリ直下
+    # 3. dataフォルダ内
+    # 4. configフォルダ内
+    # 5. ユーザーホームディレクトリ
     DEFAULT_VALUE_PATHS = [
+        USER_DOC_DIR / 'defaults.txt',
         ROOT_DIR / 'defaults.txt',
         ROOT_DIR / 'data' / 'defaults.txt',
         ROOT_DIR / 'config' / 'defaults.txt',
@@ -37,22 +42,22 @@ class Config:
     ]
     
     # マスターディレクトリ
-    MASTER_DIR = DATA_DIR / 'data' / 'master'
+    MASTER_DIR = DATA_DIR / 'master'
     
     # マスタデータファイル
     MASTER_DATA_FILE = MASTER_DIR / 'factory_info.csv'
     
     # データベース設定
-    DB_PATH = DATA_DIR / 'data' / 'projects.db'
+    DB_PATH = DATA_DIR / 'projects.db'
     
     # マスターフォルダのパス
-    MASTER_FOLDER = DATA_DIR / 'data' / 'templates' / 'project'
+    MASTER_FOLDER = DATA_DIR / 'templates' / 'project'
     
     # 出力先ベースディレクトリ
-    OUTPUT_BASE_DIR = DATA_DIR / 'data' / 'projects'
+    OUTPUT_BASE_DIR = DATA_DIR / 'projects'
     
     # ダッシュボードCSV出力設定
-    DASHBOARD_EXPORT_DIR = DATA_DIR / 'data' / 'exports'
+    DASHBOARD_EXPORT_DIR = DATA_DIR / 'exports'
     DASHBOARD_EXPORT_FILE = DASHBOARD_EXPORT_DIR / 'dashboard.csv'
     PROJECTS_EXPORT_FILE = DASHBOARD_EXPORT_DIR / 'projects.csv'
     
@@ -60,7 +65,7 @@ class Config:
     METADATA_FOLDER_NAME = "999. metadata"
     TASK_FILE_NAME = "tasks.csv"
     
-    # ログファイルパス
+    # ログファイルパス (ログはアプリケーションディレクトリに保存)
     LOG_FILE = ROOT_DIR / 'logs' / 'app.log'
     
     # ログ設定
@@ -79,11 +84,11 @@ class Config:
     DOCUMENT_PROCESSOR = {
         'template_dir': MASTER_FOLDER,
         'output_dir': OUTPUT_BASE_DIR,
-        'temp_dir': DATA_DIR / 'data' / 'temp',
+        'temp_dir': DATA_DIR / 'temp',
         'supported_extensions': ['.doc', '.docx', '.xls', '.xlsx', '.xlsm'],
         'default_encoding': 'utf-8',
         'backup_enabled': True,
-        'backup_dir': DATA_DIR / 'data' / 'backup'
+        'backup_dir': DATA_DIR / 'backup'
     }
     
     @classmethod
@@ -99,6 +104,11 @@ class Config:
             if path:
                 default_paths.append(Path(path))
         
+        # ユーザードキュメントパスを優先
+        user_defaults = cls.USER_DOC_DIR / "defaults.txt"
+        if user_defaults.exists():
+            default_paths.insert(0, user_defaults)
+        
         # 従来のパスも追加
         default_paths.extend(cls.DEFAULT_VALUE_PATHS)
         return default_paths
@@ -110,7 +120,7 @@ class Config:
         registry = PathRegistry.get_instance()
         
         # 基本パス登録
-        registry.register_path("DATA_DIR", cls.DATA_DIR / 'data')
+        registry.register_path("DATA_DIR", cls.DATA_DIR)
         registry.register_path("MASTER_DIR", cls.MASTER_DIR)
         registry.register_path("MASTER_FOLDER", cls.MASTER_FOLDER)
         registry.register_path("OUTPUT_BASE_DIR", cls.OUTPUT_BASE_DIR)
@@ -124,6 +134,7 @@ class Config:
         os.environ["PMSUITE_DASHBOARD_FILE"] = str(cls.DASHBOARD_EXPORT_FILE)
         os.environ["PMSUITE_DASHBOARD_DATA_DIR"] = str(cls.DASHBOARD_EXPORT_DIR)
         os.environ["PMSUITE_DB_PATH"] = str(cls.DB_PATH)
+        os.environ["PMSUITE_DATA_DIR"] = str(cls.DATA_DIR)
         
         # ディレクトリ作成（PathRegistryを使用）
         directories = [
@@ -142,7 +153,7 @@ class Config:
             
         # 従来の方法でも作成（後方互換性のため）
         directories = [
-            cls.DATA_DIR / 'data',
+            cls.DATA_DIR,
             cls.MASTER_DIR,
             cls.MASTER_FOLDER,
             cls.OUTPUT_BASE_DIR,
@@ -234,7 +245,7 @@ class Config:
                 issues.append(f"プロジェクト出力ディレクトリの作成に失敗しました: {e}")
             
         # 書き込み権限の確認
-        data_dir = registry.get_path("DATA_DIR", cls.DATA_DIR / 'data')
+        data_dir = registry.get_path("DATA_DIR", cls.DATA_DIR)
         try:
             test_file = Path(data_dir) / '.write_test'
             test_file.touch()
@@ -288,7 +299,7 @@ class Config:
         
         return {
             'base_dir': registry.get_path("ROOT", str(cls.ROOT_DIR)),
-            'data_dir': registry.get_path("DATA_DIR", str(cls.DATA_DIR / 'data')),
+            'data_dir': registry.get_path("DATA_DIR", str(cls.DATA_DIR)),
             'master_dir': registry.get_path("MASTER_DIR", str(cls.MASTER_DIR)),
             'output_dir': registry.get_path("OUTPUT_BASE_DIR", str(cls.OUTPUT_BASE_DIR)),
             'db_path': registry.get_path("DB_PATH", str(cls.DB_PATH)),

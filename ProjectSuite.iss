@@ -1,10 +1,10 @@
 [Setup]
 AppName=ProjectSuite
-AppVersion=2025.04.02
+AppVersion=2025.04.05
 DefaultDirName={pf}\ProjectSuite
 DefaultGroupName=ProjectSuite
 OutputDir=installer
-OutputBaseFilename=ProjectSuite_Setup_2025_04_02
+OutputBaseFilename=ProjectSuite_Setup_2025_04_05
 Compression=lzma
 SolidCompression=yes
 

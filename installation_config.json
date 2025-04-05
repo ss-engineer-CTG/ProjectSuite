@@ -1,0 +1,22 @@
+{
+    "data_directories": [
+      "exports",
+      "master",
+      "projects",
+      "templates",
+      "temp",
+      "backup"
+    ],
+    "critical_files": [
+      "projects.db",
+      "master/factory_info.csv",
+      "exports/dashboard.csv",
+      "exports/projects.csv"
+    ],
+    "version": "1.0.0",
+    "migration_settings": {
+      "auto_migrate": true,
+      "backup_before_migration": true,
+      "ignore_errors": false
+    }
+  }

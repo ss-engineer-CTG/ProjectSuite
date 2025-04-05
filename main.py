@@ -14,6 +14,8 @@ from tkinter import messagebox
 
 # PathRegistry をインポート
 from PathRegistry import PathRegistry, get_path, ensure_dir
+# データ移行用のユーティリティをインポート
+from data_migrator import DataMigrator
 
 # アプリケーションのルートディレクトリを特定
 if getattr(sys, 'frozen', False):
@@ -102,8 +104,9 @@ def setup_environment() -> None:
     """
     アプリケーション環境のセットアップ
     
-    - ディレクトリ構造の確認と作成
+    - ユーザードキュメントフォルダの確認と作成
     - 設定ファイルの確認
+    - データの移行
     - PathRegistryの初期化と診断
     """
     try:
@@ -112,11 +115,31 @@ def setup_environment() -> None:
         
         # 基本パスの登録
         registry.register_path("ROOT", str(APP_ROOT))
-        registry.register_path("DATA_DIR", str(APP_ROOT / "data"))
-        registry.register_path("LOGS_DIR", str(APP_ROOT / "logs"))
-        registry.register_path("PROJECTMANAGER_DIR", str(APP_ROOT / "ProjectManager"))
-        registry.register_path("CREATEPROJECTLIST_DIR", str(APP_ROOT / "CreateProjectList"))
-        # ProjectDashBoardパスの登録を削除
+        
+        # ユーザードキュメントのProjectSuiteディレクトリを登録
+        user_docs_dir = Path.home() / "Documents" / "ProjectSuite"
+        registry.register_path("USER_DATA_DIR", str(user_docs_dir))
+        
+        # 初回起動かどうかの確認
+        is_first_run = registry.check_first_run()
+        
+        if is_first_run:
+            logging.info("初回起動を検出しました。データを移行します。")
+            
+            # データ移行の実行
+            migrator = DataMigrator(registry)
+            
+            # データのコピー
+            result = migrator.migrate_data()
+            
+            if result['success']:
+                logging.info(f"データ移行が完了しました。{result['copied_files']}ファイルをコピーしました。")
+                # 初期化完了マークを作成
+                registry.mark_initialization_complete()
+            else:
+                logging.error(f"データ移行に失敗しました: {result['error']}")
+        else:
+            logging.info("既存のユーザーデータディレクトリを使用します。")
         
         # 診断を実行して問題を検出
         diagnosis = registry.diagnose()
@@ -128,6 +151,13 @@ def setup_environment() -> None:
         
         # ディレクトリの作成
         ensure_dir("LOGS_DIR")
+        ensure_dir("DATA_DIR")
+        ensure_dir("EXPORTS_DIR")
+        ensure_dir("TEMPLATES_DIR")
+        ensure_dir("PROJECTS_DIR")
+        ensure_dir("MASTER_DIR")
+        ensure_dir("TEMP_DIR")
+        ensure_dir("BACKUP_DIR")
                 
         # defaults.txtの確認
         defaults_path = APP_ROOT / "defaults.txt"
@@ -172,7 +202,7 @@ def initialize_app() -> Optional[DatabaseManager]:
         
         # アダプターの適用
         try:
-            from ProjectManager.config_adapters import adapt_project_manager_config
+            from ProjectManager.config_adapters_pm import adapt_project_manager_config
             adapt_project_manager_config()
             logging.info("ProjectManager設定アダプターを適用しました")
         except Exception as e:
@@ -189,7 +219,8 @@ def initialize_app() -> Optional[DatabaseManager]:
         Config.validate_environment()
         
         # データベースマネージャーの初期化とマイグレーション
-        db_manager = DatabaseManager(Config.DB_PATH)
+        db_path = get_path("DB_PATH", Config.DB_PATH)
+        db_manager = DatabaseManager(db_path)
         logging.info("データベースマネージャーを初期化しました")
         
         # タスクデータの読み込み
