@@ -27,6 +27,9 @@ class PathRegistry:
     # パス設定ファイル名
     CONFIG_FILE = "path_registry.json"
     
+    # 初回起動フラグファイル名
+    INIT_FLAG_FILE = ".init_complete"
+    
     @classmethod
     def get_instance(cls):
         """シングルトンインスタンスを取得"""
@@ -53,6 +56,27 @@ class PathRegistry:
             # 通常実行時は現在のスクリプトの位置から判断
             self.root_dir = self._find_project_root()
         
+        # ユーザードキュメントのProjectSuiteディレクトリを設定
+        self.user_data_dir = Path.home() / "Documents" / "ProjectSuite"
+        logger.info(f"ユーザードキュメントフォルダを設定: {self.user_data_dir}")
+        
+        # データディレクトリの設定
+        if self.user_data_dir.exists():
+            # 既に存在する場合はそれを使用
+            self.data_dir = self.user_data_dir
+            logger.info(f"既存のユーザードキュメントフォルダを使用: {self.data_dir}")
+        else:
+            # 存在しない場合は作成
+            try:
+                self.data_dir = self.user_data_dir
+                self.data_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"ユーザードキュメントに新しいフォルダを作成: {self.data_dir}")
+            except Exception as e:
+                # エラーが発生した場合はアプリケーションディレクトリを使用
+                logger.error(f"ユーザードキュメントディレクトリ作成エラー: {e}")
+                self.data_dir = self.root_dir / "data"
+                logger.info(f"アプリケーションのデータディレクトリにフォールバック: {self.data_dir}")
+        
         # 初期パスの設定
         self._setup_base_paths()
         
@@ -62,7 +86,28 @@ class PathRegistry:
         # 環境変数からパスをオーバーライド
         self._override_from_env()
         
-        logger.info(f"PathRegistry initialized with root: {self.root_dir}")
+        logger.info(f"PathRegistry initialized with root: {self.root_dir}, data: {self.data_dir}")
+    
+    def check_first_run(self) -> bool:
+        """
+        初回起動かどうかを確認
+        
+        Returns:
+            bool: 初回起動の場合はTrue
+        """
+        init_flag = self.data_dir / self.INIT_FLAG_FILE
+        return not init_flag.exists()
+    
+    def mark_initialization_complete(self) -> None:
+        """初期化完了をマークする"""
+        init_flag = self.data_dir / self.INIT_FLAG_FILE
+        try:
+            # マークファイルの作成
+            with open(init_flag, 'w') as f:
+                f.write(datetime.now().isoformat())
+            logger.info(f"初期化完了マークを作成: {init_flag}")
+        except Exception as e:
+            logger.error(f"初期化完了マーク作成エラー: {e}")
     
     def _find_project_root(self) -> Path:
         """プロジェクトルートディレクトリを探索"""
@@ -73,7 +118,8 @@ class PathRegistry:
         root_markers = [
             "ProjectManagerSuite.spec",
             "build.py",
-            "launcher.py"
+            "launcher.py",
+            "main.py"
         ]
         
         # 上位ディレクトリを探索
@@ -106,16 +152,17 @@ class PathRegistry:
         # 共通ディレクトリ構造
         self._paths.update({
             "ROOT": str(self.root_dir),
-            "DATA_DIR": str(self.root_dir / "data"),
-            "LOGS_DIR": str(self.root_dir / "logs"),
-            "EXPORTS_DIR": str(self.root_dir / "data" / "exports"),
-            "TEMPLATES_DIR": str(self.root_dir / "data" / "templates"),
-            "PROJECTS_DIR": str(self.root_dir / "data" / "projects"),
-            "MASTER_DIR": str(self.root_dir / "data" / "master"),
-            "TEMP_DIR": str(self.root_dir / "data" / "temp"),
-            "DB_PATH": str(self.root_dir / "data" / "projects.db"),
-            "DASHBOARD_FILE": str(self.root_dir / "data" / "exports" / "dashboard.csv"),
-            "PROJECTS_FILE": str(self.root_dir / "data" / "exports" / "projects.csv"),
+            "DATA_DIR": str(self.data_dir),
+            "LOGS_DIR": str(self.root_dir / "logs"),  # ログはアプリケーションディレクトリに保持
+            "EXPORTS_DIR": str(self.data_dir / "exports"),
+            "TEMPLATES_DIR": str(self.data_dir / "templates"),
+            "PROJECTS_DIR": str(self.data_dir / "projects"),
+            "MASTER_DIR": str(self.data_dir / "master"),
+            "TEMP_DIR": str(self.data_dir / "temp"),
+            "BACKUP_DIR": str(self.data_dir / "backup"),
+            "DB_PATH": str(self.data_dir / "projects.db"),
+            "DASHBOARD_FILE": str(self.data_dir / "exports" / "dashboard.csv"),
+            "PROJECTS_FILE": str(self.data_dir / "exports" / "projects.csv"),
         })
         
         # 各アプリのパス
@@ -126,6 +173,7 @@ class PathRegistry:
         """設定ファイルからパス情報を読み込む"""
         # 複数の可能性のある場所を検索
         config_locations = [
+            self.data_dir / self.CONFIG_FILE,  # ユーザードキュメントフォルダ
             self.root_dir / self.CONFIG_FILE,
             self.root_dir / "config" / self.CONFIG_FILE,
             Path.home() / "ProjectManagerSuite" / self.CONFIG_FILE
@@ -157,13 +205,19 @@ class PathRegistry:
             "PMSUITE_DASHBOARD_FILE": "DASHBOARD_FILE",
             "PMSUITE_DASHBOARD_DATA_DIR": "EXPORTS_DIR",
             "PMSUITE_DB_PATH": "DB_PATH",
-            "PMSUITE_DATA_DIR": "DATA_DIR"
+            "PMSUITE_DATA_DIR": "DATA_DIR",
+            "PMSUITE_USER_DIR": "USER_DATA_DIR"
         }
         
         for env_var, path_key in special_vars.items():
             if env_var in os.environ:
                 self._paths[path_key] = os.environ[env_var]
                 logger.info(f"Path overridden from special environment variable: {path_key}={os.environ[env_var]}")
+        
+        # 環境変数に重要なパスを設定（他のコンポーネントから参照可能に）
+        os.environ["PMSUITE_DATA_DIR"] = str(self.data_dir)
+        os.environ["PMSUITE_DB_PATH"] = str(self.data_dir / "projects.db")
+        os.environ["PMSUITE_DASHBOARD_FILE"] = str(self.data_dir / "exports" / "dashboard.csv")
     
     def get_path(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """
@@ -261,9 +315,11 @@ class PathRegistry:
             # 3. 共通のフォールバックディレクトリをチェック
             fallback_locations = [
                 self.root_dir,
-                self.root_dir / "data",
+                self.data_dir,
+                Path.home() / "Documents" / "ProjectSuite",
                 Path.home() / "ProjectManagerSuite",
-                Path.home() / "Documents" / "ProjectManagerSuite"
+                Path.home() / "Documents" / "ProjectManagerSuite",
+                Path.home() / "Documents" / "Projects" / "ProjectSuite" / "ProjectManager" / "data"
             ]
             
             filename = path_obj.name
@@ -474,9 +530,12 @@ class PathRegistry:
             bool: 成功したらTrue
         """
         if path is None:
-            path = self.root_dir / self.CONFIG_FILE
+            path = self.data_dir / self.CONFIG_FILE
         
         try:
+            # 親ディレクトリが存在しない場合は作成
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(self._paths, f, indent=2, ensure_ascii=False)
                 logger.info(f"Exported path configuration to {path}")
@@ -493,6 +552,46 @@ class PathRegistry:
             dict: 全パス情報
         """
         return dict(self._paths)
+    
+    def find_data_source(self) -> Optional[Path]:
+        """
+        データソースを検索
+        
+        Returns:
+            Optional[Path]: 検出されたデータソースパス
+        """
+        # 検索場所のリスト（優先順位順）
+        potential_paths = [
+            # アプリケーションのデータディレクトリ
+            self.root_dir / "data",
+            
+            # ProjectManagerのデータディレクトリ（複数の可能性）
+            self.root_dir / "ProjectManager" / "data",
+            Path(os.getcwd()) / "ProjectManager" / "data",
+            
+            # 開発環境でよく使われるパス
+            Path.home() / "Documents" / "Projects" / "ProjectSuite" / "ProjectManager" / "data",
+            Path.home() / "Projects" / "ProjectSuite" / "ProjectManager" / "data"
+        ]
+        
+        # パスが存在するか確認
+        for path in potential_paths:
+            if path.exists() and path.is_dir():
+                # 実際にデータらしきものが存在するか確認
+                has_content = any([
+                    (path / "projects").exists(),
+                    (path / "templates").exists(),
+                    (path / "master").exists(),
+                    (path / "projects.db").exists()
+                ])
+                
+                if has_content:
+                    logger.info(f"データソースディレクトリを発見: {path}")
+                    return path
+        
+        # 見つからない場合
+        logger.warning("データソースディレクトリが見つかりませんでした")
+        return None
 
 # 簡易アクセス関数
 def get_path(key: str, default: Optional[str] = None) -> Optional[str]:

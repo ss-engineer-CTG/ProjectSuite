@@ -26,27 +26,33 @@ class ConfigResolver:
             ValueError: パス解決に失敗した場合
         """
         try:
+            # ユーザードキュメントフォルダを優先
+            user_docs_dir = Path.home() / "Documents" / "ProjectSuite"
+            
+            # 環境変数でのオーバーライドを確認
+            if "PMSUITE_DATA_DIR" in os.environ:
+                user_docs_dir = Path(os.environ["PMSUITE_DATA_DIR"])
+            
+            # main_configのデータディレクトリを確認
+            if main_config.get('data_dir'):
+                data_dir = Path(main_config['data_dir'])
+                if data_dir.is_absolute():
+                    # 絶対パスの場合はそれを使用
+                    if data_dir.exists() or data_dir.parent.exists():
+                        user_docs_dir = data_dir
+            
             # ベースディレクトリの解決
             base_dir = Path(main_config.get('base_dir', ''))
             if not base_dir.is_absolute():
                 base_dir = Path(os.getcwd()) / base_dir
             
-            # データディレクトリの解決
-            data_dir = main_config.get('data_dir')
-            if data_dir:
-                data_dir = Path(data_dir)
-                if not data_dir.is_absolute():
-                    data_dir = base_dir / data_dir
-            else:
-                data_dir = base_dir / 'data'
-            
             # 各種パスの解決
             paths = {
-                'template_dir': str(data_dir / 'templates'),
-                'output_dir': str(data_dir / 'projects'),
-                'temp_dir': str(data_dir / 'temp'),
-                'master_dir': str(data_dir / 'master'),
-                'export_dir': str(data_dir / 'exports')
+                'template_dir': str(user_docs_dir / 'templates'),
+                'output_dir': str(user_docs_dir / 'projects'),
+                'temp_dir': str(user_docs_dir / 'temp'),
+                'master_dir': str(user_docs_dir / 'master'),
+                'export_dir': str(user_docs_dir / 'exports')
             }
             
             # パスの正規化
