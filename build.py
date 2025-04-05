@@ -1,398 +1,358 @@
 """
-ProjectManagerSuite ビルドスクリプト - 最適化版
-- PyInstallerによる実行ファイル生成
-- Inno Setupによるインストーラー作成
-- 冗長な処理の削除と効率化
+ProjectSuiteビルドスクリプト
+PyInstallerを使用してパッケージングを自動化する
 """
 
 import os
-import sys
-import subprocess
 import shutil
-import argparse
-import json
-import logging
+import subprocess
+import sys
 from pathlib import Path
+import datetime
+import traceback
 
-# ロギングの設定
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("builder")
-
-# ルートディレクトリの設定（常に絶対パスを使用）
-ROOT_DIR = Path(__file__).parent.absolute()
-
-# 重要なディレクトリパスの初期設定
-DIST_DIR = ROOT_DIR / "dist"
-BUILD_DIR = ROOT_DIR / "build"
-INSTALLER_DIR = ROOT_DIR / "installer"
-
-def load_config():
-    """設定ファイルの読み込み"""
-    config_path = ROOT_DIR / "build_config.json"
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
-            logger.info(f"設定ファイルを読み込みました: {config_path}")
-            return config
-    except Exception as e:
-        logger.error(f"設定ファイル読み込みエラー: {e}")
-        # デフォルト設定を返す
-        return {
-            "app_info": {
-                "name": "ProjectManagerSuite",
-                "version": "1.0.0"
-            },
-            "build": {
-                "output_dir": "dist",
-                "build_dir": "build",
-                "clean_build": True,
-                "create_installer": True
-            }
-        }
-
-def verify_required_files():
-    """必要なファイルが存在するか確認"""
-    logger.info("必要なファイルを確認中...")
-    
-    required_files = [
-        ROOT_DIR / "main.py",
-        ROOT_DIR / "defaults.txt",
-        ROOT_DIR / "ProjectManagerSuite.spec"
+def create_directories():
+    """必要なディレクトリを作成"""
+    directories = [
+        'build',
+        'dist',
+        'dist/ProjectManager/data/projects',
+        'dist/ProjectManager/data/exports',
+        'dist/ProjectManager/logs',
+        'installer',
     ]
     
-    required_dirs = [
-        ROOT_DIR / "ProjectManager",
-        ROOT_DIR / "CreateProjectList",
-        ROOT_DIR / "ProjectDashBoard"
-    ]
-    
-    all_exist = True
-    
-    # ファイルの確認
-    for file_path in required_files:
-        if not file_path.is_file():
-            logger.error(f"必要なファイルが見つかりません: {file_path}")
-            all_exist = False
-    
-    # ディレクトリの確認
-    for dir_path in required_dirs:
-        if not dir_path.is_dir():
-            logger.error(f"必要なディレクトリが見つかりません: {dir_path}")
-            all_exist = False
-    
-    return all_exist
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        print(f"ディレクトリを作成: {directory}")
 
-def clean_build_dirs():
-    """ビルドディレクトリのクリーンアップ"""
-    logger.info("ビルドディレクトリをクリーンアップ中...")
+def build_application():
+    """アプリケーションのビルド"""
+    print("PyInstallerでビルドを開始...")
     
-    # ディレクトリの削除
-    for dir_path in [BUILD_DIR, DIST_DIR]:
-        if dir_path.exists():
-            try:
-                shutil.rmtree(dir_path)
-                logger.info(f"- {dir_path} を削除しました")
-            except Exception as e:
-                logger.error(f"- {dir_path} の削除に失敗: {e}")
+    # .specファイルがない場合は、新しく作成する
+    if not Path('ProjectSuite.spec').exists():
+        print("ProjectSuite.specファイルが見つかりません。新しく作成します...")
+        create_spec_file()
     
-    # インストーラーディレクトリの作成
-    INSTALLER_DIR.mkdir(exist_ok=True, parents=True)
-    logger.info(f"- {INSTALLER_DIR} を作成しました")
-
-def create_dashboard_launcher():
-    """ダッシュボード起動用バッチファイルの作成"""
-    batch_file = ROOT_DIR / "dashboard_launcher.bat"
-    
+    # ビルド実行
     try:
-        with open(batch_file, 'w', encoding='utf-8') as f:
-            f.write('@echo off\n')
-            f.write('REM Dashboard launcher script\n')
-            f.write('SET PYTHONPATH=%~dp0\n')
-            f.write('"%~dp0ProjectManagerSuite.exe" ProjectDashBoard\n')
-        logger.info(f"ダッシュボード起動バッチファイルを作成: {batch_file}")
-        return batch_file
-    except Exception as e:
-        logger.error(f"バッチファイル作成エラー: {e}")
-        return None
-
-def run_pyinstaller(config):
-    """PyInstallerでビルドを実行 - 最適化版"""
-    logger.info("PyInstallerでビルドを実行中...")
-    
-    # バッチファイルの作成は .spec ファイルに移動
-    # ここでは明示的に作成しない
-    
-    # specファイルのパス
-    spec_file = ROOT_DIR / "ProjectManagerSuite.spec"
-    
-    if not spec_file.exists():
-        logger.error(f"エラー: specファイルが見つかりません: {spec_file}")
-        return False
-    
-    # コマンドライン構築
-    cmd = [
-        sys.executable, 
-        "-m", 
-        "PyInstaller", 
-        str(spec_file), 
-        "--noconfirm", 
-        "--clean"
-    ]
-    
-    # UPXの使用設定
-    if config["build"].get("use_upx", True):
-        cmd.append("--upx-dir=upx")
-    
-    logger.info(f"実行コマンド: {' '.join(cmd)}")
-    logger.info(f"実行ディレクトリ: {ROOT_DIR}")
-    
-    try:
-        # ビルド実行
         result = subprocess.run(
-            cmd, 
-            check=True, 
-            cwd=str(ROOT_DIR),
-            capture_output=True, 
-            text=True,
-            encoding='utf-8'
+            ['pyinstaller', 'ProjectSuite.spec'],
+            check=True,
+            capture_output=True,
+            text=True
         )
-        
-        # 出力のログ出力
-        for line in result.stdout.splitlines():
-            if "[WARNING]" in line:
-                logger.warning(line)
-            else:
-                logger.debug(line)
-        
-        logger.info("PyInstallerによるビルドが完了しました")
-        return True
-        
+        print("ビルド完了")
     except subprocess.CalledProcessError as e:
-        logger.error(f"PyInstallerのビルドに失敗しました")
-        logger.error(f"終了コード: {e.returncode}")
-        logger.error(f"標準出力:\n{e.stdout}")
-        logger.error(f"標準エラー出力:\n{e.stderr}")
-        return False
+        print(f"ビルドに失敗しました。エラー内容:")
+        print(e.stderr)
+        sys.exit(1)
 
-def verify_build_result(config):
-    """ビルド結果の検証"""
-    logger.info("ビルド結果を検証中...")
+def create_spec_file():
+    """基本的なspec設定ファイルを作成"""
+    spec_content = """# -*- mode: python ; coding: utf-8 -*-
+
+import os
+block_cipher = None
+
+# データファイルの定義 - シンプルなタプル形式 (ソース, ターゲット)
+datas = [
+    ('defaults.txt', '.'),
+    ('PathRegistry.py', '.'),
+]
+
+# プロジェクトマネージャーのソースファイルがある場合
+if os.path.exists('ProjectManager/src'):
+    datas.append(('ProjectManager/src', 'ProjectManager/src'))
+
+# テンプレートファイルがある場合
+if os.path.exists('ProjectManager/data/templates'):
+    datas.append(('ProjectManager/data/templates', 'ProjectManager/data/templates'))
+
+# 必要な隠れた依存関係
+hidden_imports = [
+    'pandas',
+    'win32com',
+    'openpyxl',
+    'xlrd',
+    'portalocker',
+    'customtkinter',
+    'PIL',
+    'docx',
+    'ProjectManager',
+    'CreateProjectList',
+]
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hidden_imports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='ProjectSuite',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='ProjectSuite',
+)
+"""
     
-    app_name = config["app_info"]["name"]
+    with open('ProjectSuite.spec', 'w', encoding='utf-8') as f:
+        f.write(spec_content)
     
-    # 実行ファイルの検証
-    exe_path = DIST_DIR / app_name / f"{app_name}.exe"
-    if not exe_path.exists():
-        logger.error(f"実行ファイルが見つかりません: {exe_path}")
+    print("ProjectSuite.specファイルを作成しました")
+
+def copy_additional_files():
+    """追加ファイルのコピー"""
+    print("追加ファイルをコピーしています...")
+    
+    # README、ライセンスなどのコピー
+    if Path('README.md').exists():
+        shutil.copy('README.md', 'dist/')
+    
+    # 初期データフォルダ構造の作成
+    data_dirs = [
+        'dist/ProjectManager/data/projects',
+        'dist/ProjectManager/data/exports',
+        'dist/ProjectManager/logs',
+    ]
+    
+    for data_dir in data_dirs:
+        if not Path(data_dir).exists():
+            Path(data_dir).mkdir(parents=True, exist_ok=True)
+            print(f"データディレクトリを作成: {data_dir}")
+    
+    # 空のファイルの作成（必要に応じて）
+    empty_files = [
+        'dist/ProjectManager/logs/app.log',
+    ]
+    
+    for empty_file in empty_files:
+        if not Path(empty_file).exists():
+            Path(empty_file).touch()
+            print(f"空のファイルを作成: {empty_file}")
+    
+    print("追加ファイルのコピー完了")
+
+def create_empty_db():
+    """空のデータベースファイルを作成"""
+    db_path = Path('dist/ProjectManager/data/projects.db')
+    
+    if not db_path.parent.exists():
+        db_path.parent.mkdir(parents=True)
+    
+    if not db_path.exists():
+        # 空のファイルを作成
+        db_path.touch()
+        print(f"空のデータベースファイルを作成: {db_path}")
+
+def find_exe_file():
+    """実行ファイルを検索する"""
+    # 可能性のあるパスを確認
+    candidates = [
+        Path('dist/ProjectSuite.exe'),
+        Path('dist/ProjectSuite/ProjectSuite.exe')
+    ]
+    
+    # distディレクトリ内を再帰的に検索
+    if Path('dist').exists():
+        for path in Path('dist').glob('**/ProjectSuite.exe'):
+            if path not in candidates:
+                candidates.append(path)
+    
+    # 存在確認
+    for path in candidates:
+        if path.exists():
+            return path
+    
+    return None
+
+def generate_installer_script():
+    """InnoSetupのインストーラースクリプトを生成"""
+    print("インストーラースクリプトを生成...")
+    
+    # まず実際のEXEファイルの場所を確認
+    exe_path = find_exe_file()
+    
+    if not exe_path:
+        print("警告: 実行ファイル(ProjectSuite.exe)が見つかりません。")
+        print("インストーラースクリプトの生成をスキップします。")
         return False
     
-    # ダッシュボード起動スクリプトの検証
-    batch_path = DIST_DIR / app_name / "dashboard_launcher.bat"
-    if not batch_path.exists():
-        logger.warning(f"ダッシュボード起動スクリプトが見つかりません: {batch_path}")
+    print(f"実行ファイルを検出: {exe_path}")
     
-    # データディレクトリの作成（存在しない場合のみ）
-    data_dir = DIST_DIR / app_name / "data"
-    if not data_dir.exists():
-        data_dir.mkdir(parents=True)
-        logger.warning(f"データディレクトリを作成しました: {data_dir}")
+    # 親ディレクトリのパスを取得（ソースディレクトリ）
+    source_dir = exe_path.parent
     
-    logger.info("ビルド結果の検証が完了しました")
+    # 実行ファイルとソースディレクトリの相対パス
+    rel_exe_path = str(exe_path).replace("\\", "\\\\")
+    rel_source_dir = str(source_dir).replace("\\", "\\\\")
+    
+    version = datetime.datetime.now().strftime("%Y.%m.%d")
+    
+    iss_content = f"""[Setup]
+AppName=ProjectSuite
+AppVersion={version}
+DefaultDirName={{pf}}\\ProjectSuite
+DefaultGroupName=ProjectSuite
+OutputDir=installer
+OutputBaseFilename=ProjectSuite_Setup_{version.replace('.', '_')}
+Compression=lzma
+SolidCompression=yes
+
+[Files]
+Source: "{rel_exe_path}"; DestDir: "{{app}}"; Flags: ignoreversion
+Source: "{rel_source_dir}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Dirs]
+Name: "{{app}}\\ProjectManager\\data\\projects"; Permissions: users-modify
+Name: "{{app}}\\ProjectManager\\data\\exports"; Permissions: users-modify
+Name: "{{app}}\\ProjectManager\\logs"; Permissions: users-modify
+
+[Icons]
+Name: "{{group}}\\ProjectSuite"; Filename: "{{app}}\\ProjectSuite.exe"
+Name: "{{commondesktop}}\\ProjectSuite"; Filename: "{{app}}\\ProjectSuite.exe"
+
+[Run]
+Filename: "{{app}}\\ProjectSuite.exe"; Description: "Launch ProjectSuite"; Flags: nowait postinstall skipifsilent
+"""
+    
+    with open("ProjectSuite.iss", "w", encoding="utf-8") as f:
+        f.write(iss_content)
+    
+    print("インストーラースクリプトを生成しました: ProjectSuite.iss")
     return True
 
-def create_installer(config):
-    """Inno Setupを使用してインストーラーを作成 - 最適化版"""
-    logger.info("Inno Setupでインストーラーを作成中...")
+def compile_installer():
+    """InnoSetupでインストーラーをコンパイル"""
+    print("インストーラーのコンパイルを試行中...")
     
-    # Inno Setupコンパイラの検索
-    iscc_paths = [
+    # インストーラースクリプトが存在するか確認
+    if not Path("ProjectSuite.iss").exists():
+        print("インストーラースクリプトが見つかりません。インストーラーのコンパイルをスキップします。")
+        return
+    
+    # InnoSetupのコンパイラが利用可能か確認
+    inno_paths = [
         r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-        r"C:\Program Files\Inno Setup 6\ISCC.exe"
+        r"C:\Program Files\Inno Setup 6\ISCC.exe",
     ]
     
     iscc_path = None
-    for path in iscc_paths:
-        if os.path.exists(path):
+    for path in inno_paths:
+        if Path(path).exists():
             iscc_path = path
             break
     
-    if not iscc_path:
-        logger.error("Inno Setup Compilerが見つかりません")
-        return False
-    
-    # インストーラースクリプトの取得
-    installer_script = ROOT_DIR / "installer.iss"
-    if not installer_script.exists():
-        logger.error(f"インストーラースクリプトが見つかりません: {installer_script}")
-        return False
-    
-    # アプリ名とバージョンを設定ファイルから取得
-    app_name = config["app_info"]["name"]
-    app_version = config["app_info"]["version"]
-    app_publisher = config["app_info"].get("publisher", "Your Company")
-    
-    # 追加設定
-    output_base_filename = config["installer"].get("file_name", f"{app_name}_Setup")
-    
-    # アイコンの存在確認
-    icon_path = ROOT_DIR / "assets" / "icon.ico"
-    icon_param = []
-    if icon_path.exists():
-        icon_param = [f"/DSetupIconFile={icon_path}"]
-    else:
-        logger.warning(f"アイコンファイルが見つからないため、デフォルトアイコンを使用します: {icon_path}")
-    
-    # Inno Setupに渡すパラメータを準備
-    cmd = [
-        iscc_path, 
-        f"/DMyAppName={app_name}", 
-        f"/DMyAppVersion={app_version}", 
-        f"/DMyAppPublisher={app_publisher}",
-        f"/DOutputBaseFilename={output_base_filename}",
-        f"/DOutputDir={INSTALLER_DIR}"
-    ] + icon_param + [
-        str(installer_script)
-    ]
-    
-    try:
-        # コンソール文字コード設定（Windows環境の場合）
-        if os.name == 'nt':
-            subprocess.run("chcp 65001", shell=True, check=False)
-        
-        # Inno Setupの実行
-        result = subprocess.run(
-            cmd, 
-            check=True, 
-            cwd=str(ROOT_DIR), 
-            capture_output=True, 
-            text=True,
-            encoding='utf-8'
-        )
-        
-        logger.info("インストーラーの作成に成功しました")
-        
-        # 出力パスの検証
-        installer_file = INSTALLER_DIR / f"{output_base_filename}.exe"
-        if installer_file.exists():
-            logger.info(f"インストーラーファイル: {installer_file}")
-            return True
-        else:
-            logger.warning(f"インストーラーファイルが見つかりません: {installer_file}")
-            return False
+    if iscc_path:
+        print(f"InnoSetupコンパイラを発見: {iscc_path}")
+        try:
+            result = subprocess.run(
+                [iscc_path, "ProjectSuite.iss"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
             
-    except subprocess.CalledProcessError as e:
-        logger.error(f"インストーラービルドに失敗しました")
-        logger.error(f"終了コード: {e.returncode}")
-        logger.error(f"標準出力:\n{e.stdout}")
-        logger.error(f"標準エラー出力:\n{e.stderr}")
-        return False
-
-def create_portable_archive(config):
-    """ポータブル版のZIPアーカイブを作成"""
-    logger.info("ポータブル版アーカイブを作成中...")
-    
-    app_name = config["app_info"]["name"]
-    app_version = config["app_info"]["version"]
-    
-    # ディストディレクトリのパス
-    dist_app_dir = DIST_DIR / app_name
-    
-    if not dist_app_dir.exists():
-        logger.error(f"ディストディレクトリが存在しません: {dist_app_dir}")
-        return False
-    
-    # アーカイブファイル名
-    archive_name = f"{app_name}_v{app_version}_Portable"
-    archive_path = INSTALLER_DIR / f"{archive_name}.zip"
-    
-    try:
-        # ZIP圧縮
-        shutil.make_archive(
-            str(INSTALLER_DIR / archive_name),  # ベース名（拡張子なし）
-            'zip',                              # フォーマット
-            root_dir=DIST_DIR,                  # アーカイブするディレクトリ
-            base_dir=app_name                   # アーカイブに含めるサブディレクトリ
-        )
-        
-        logger.info(f"ポータブル版アーカイブを作成: {archive_path}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"ポータブル版アーカイブの作成に失敗: {e}")
-        return False
+            print(result.stdout)
+            print("インストーラーのコンパイルに成功しました")
+        except subprocess.CalledProcessError as e:
+            print(f"インストーラーのコンパイル中にエラー:")
+            print(e.stdout)
+            print(e.stderr)
+        except Exception as e:
+            print(f"インストーラーのコンパイル中にエラー: {e}")
+    else:
+        print("InnoSetupコンパイラが見つかりません。インストーラーのコンパイルをスキップします。")
+        print("手動でコンパイルするには、InnoSetupをインストールし、ProjectSuite.issファイルをコンパイルしてください。")
 
 def main():
-    """メイン実行関数"""
-    parser = argparse.ArgumentParser(description="ProjectManagerSuiteビルドスクリプト")
-    parser.add_argument('--no-clean', action='store_true', help='ビルド前にビルドディレクトリをクリーンアップしない')
-    parser.add_argument('--no-installer', action='store_true', help='インストーラーを作成しない')
-    parser.add_argument('--portable', action='store_true', help='ポータブル版ZIPアーカイブを作成する')
-    parser.add_argument('--verbose', action='store_true', help='詳細なログ出力')
-    args = parser.parse_args()
+    """メインビルド処理"""
+    start_time = datetime.datetime.now()
+    print(f"ビルドプロセスを開始... [{start_time.strftime('%Y-%m-%d %H:%M:%S')}]")
     
-    # 詳細ログの設定
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
-        # ハンドラーのレベルも変更
-        for handler in logger.handlers:
-            handler.setLevel(logging.DEBUG)
-            
-    logger.info(f"===== ProjectManagerSuite ビルド開始 =====")
-    logger.info(f"作業ディレクトリ: {ROOT_DIR}")
+    try:
+        # 古いビルドファイルのクリーンアップ
+        if Path('dist').exists():
+            shutil.rmtree('dist')
+            print("古いdistフォルダを削除しました")
+        
+        if Path('build').exists():
+            shutil.rmtree('build')
+            print("古いbuildフォルダを削除しました")
+        
+        # 必要なディレクトリの作成
+        create_directories()
+        
+        # アプリケーションのビルド
+        build_application()
+        
+        # 追加ファイルのコピー
+        copy_additional_files()
+        
+        # 空のDB作成
+        create_empty_db()
+        
+        # インストーラースクリプトの生成
+        script_generated = generate_installer_script()
+        
+        # インストーラーのコンパイル（スクリプト生成に成功した場合のみ）
+        if script_generated:
+            compile_installer()
+        
+        # 完了メッセージの表示
+        print("\nビルドファイルの構造:")
+        exe_path = find_exe_file()
+        if exe_path:
+            print(f"実行ファイル: {exe_path}")
+            print(f"実行するには: {exe_path} をダブルクリックするか、コマンドラインから実行してください")
+        else:
+            print("実行ファイルが見つかりません。ビルドに問題があります。")
+        
+        end_time = datetime.datetime.now()
+        duration = end_time - start_time
+        print(f"\nビルドプロセスが完了しました [{end_time.strftime('%Y-%m-%d %H:%M:%S')}]")
+        print(f"所要時間: {duration}")
     
-    # 設定の読み込み
-    config = load_config()
-    app_name = config["app_info"]["name"]
-    
-    # 必要なファイルの検証
-    if not verify_required_files():
-        logger.error("必要なファイルが揃っていません。ビルドを中止します。")
-        return 1
-    
-    # ビルドディレクトリのクリーンアップ
-    if not args.no_clean and config["build"].get("clean_build", True):
-        clean_build_dirs()
-    
-    # PyInstallerによるビルド
-    if not run_pyinstaller(config):
-        return 1
-    
-    # ビルド結果の検証
-    if not verify_build_result(config):
-        logger.warning("ビルド結果に問題があります。続行します。")
-    
-    # インストーラーの作成
-    installer_created = False
-    if not args.no_installer and config["build"].get("create_installer", True):
-        installer_created = create_installer(config)
-        if not installer_created:
-            logger.warning("インストーラーの作成に失敗しました。続行します。")
-    
-    # ポータブル版アーカイブの作成
-    portable_created = False
-    if args.portable or config["build"].get("create_portable", False):
-        portable_created = create_portable_archive(config)
-        if not portable_created:
-            logger.warning("ポータブル版アーカイブの作成に失敗しました。")
-    
-    logger.info("\n===== ビルドプロセスが完了しました =====")
-    
-    # 成功時のパス情報表示
-    exe_path = DIST_DIR / app_name / f"{app_name}.exe"
-    installer_path = INSTALLER_DIR / f"{app_name}_Setup.exe"
-    portable_path = INSTALLER_DIR / f"{app_name}_v{config['app_info']['version']}_Portable.zip"
-    
-    if exe_path.exists():
-        logger.info(f"実行ファイル: {exe_path}")
-    if installer_path.exists() and installer_created:
-        logger.info(f"インストーラー: {installer_path}")
-    if portable_path.exists() and portable_created:
-        logger.info(f"ポータブル版: {portable_path}")
-    
-    return 0
+    except Exception as e:
+        print(f"ビルドプロセス中にエラーが発生しました: {e}")
+        print(traceback.format_exc())
+        sys.exit(1)
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
