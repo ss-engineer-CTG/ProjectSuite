@@ -74,18 +74,28 @@ class DocumentProcessor:
     def _initialize_temp_dir(self) -> None:
         """一時ディレクトリの初期化"""
         try:
-            self.temp_dir = Path(tempfile.mkdtemp(prefix="doc_processor_"))
+            # ユーザードキュメント内のtempディレクトリを使用
+            user_temp_dir = Path.home() / "Documents" / "ProjectSuite" / "temp"
+            user_temp_dir.mkdir(parents=True, exist_ok=True)
+            self.temp_dir = user_temp_dir
             self.logger.info(f"一時ディレクトリを作成しました: {self.temp_dir}")
         except Exception as e:
             self.logger.error(f"一時ディレクトリ作成エラー: {e}")
-            raise
+            # フォールバックとしてsys.tempを使用
+            self.temp_dir = Path(tempfile.mkdtemp(prefix="doc_processor_"))
+            self.logger.info(f"フォールバック一時ディレクトリを作成: {self.temp_dir}")
 
     def cleanup_temp_files(self) -> None:
         """一時ファイルのクリーンアップ"""
         try:
-            if self.temp_dir and self.temp_dir.exists():
-                shutil.rmtree(self.temp_dir)
-                self.logger.info(f"一時ディレクトリを削除しました: {self.temp_dir}")
+            if self.temp_dir:
+                # 一時ディレクトリ内のファイルだけを削除（ディレクトリは保持）
+                for item in self.temp_dir.glob('*'):
+                    if item.is_file():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                self.logger.info(f"一時ディレクトリをクリーンアップしました: {self.temp_dir}")
         except Exception as e:
             self.logger.error(f"一時ファイルのクリーンアップエラー: {e}")
 

@@ -11,6 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any
 from tkinter import messagebox
+from datetime import datetime
 
 # PathRegistry をインポート
 from PathRegistry import PathRegistry, get_path, ensure_dir
@@ -60,6 +61,172 @@ except ImportError:
     from ProjectManager.src.ui.dashboard import DashboardGUI
     from ProjectManager.src.services.task_loader import TaskLoader
 
+def initialize_sample_data():
+    """サンプルデータをユーザーデータディレクトリに直接配置"""
+    try:
+        print("サンプルデータの初期化を開始します...")
+        
+        # ターゲットディレクトリ
+        target_dir = Path.home() / "Documents" / "ProjectSuite"
+        target_data_dir = target_dir / "ProjectManager" / "data"
+        print(f"Debug: ターゲットディレクトリ: {target_dir}")
+        print(f"Debug: ターゲットデータディレクトリ: {target_data_dir}")
+        
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_data_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Debug: ターゲットディレクトリを作成しました")
+        except Exception as e:
+            print(f"Warning: ターゲットディレクトリの作成に失敗しました: {e}")
+        
+        # 必要なディレクトリを作成
+        logs_dir = target_dir / "logs"
+        try:
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Debug: ログディレクトリを作成しました: {logs_dir}")
+        except Exception as e:
+            print(f"Warning: ログディレクトリの作成に失敗しました: {e}")
+        
+        for subdir in ["temp", "backup"]:
+            try:
+                (target_dir / subdir).mkdir(parents=True, exist_ok=True)
+                print(f"Debug: サブディレクトリを作成しました: {target_dir / subdir}")
+            except Exception as e:
+                print(f"Warning: サブディレクトリ {subdir} の作成に失敗しました: {e}")
+        
+        # ユーザードキュメントフォルダ内のinitialdataを探す
+        source_data = target_dir / "initialdata"
+        print(f"Debug: 初期ソースデータディレクトリパス: {source_data}")
+        print(f"Debug: ソースディレクトリ存在チェック: {source_data.exists()}")
+        
+        # initialdata が見つからない場合の代替パス
+        if not source_data.exists():
+            print(f"Warning: {source_data} が見つかりません。代替パスを検索します。")
+            
+            # 可能性のある候補パス
+            candidate_paths = [
+                Path(sys.executable).parent / "initialdata",  # 実行ファイルと同じフォルダ
+                Path(sys._MEIPASS).parent / "initialdata" if getattr(sys, 'frozen', False) else None,  # PyInstaller環境
+                Path('C:/Users/') / os.getlogin() / 'Downloads' / 'installer' / 'initialdata',  # ダウンロードフォルダ
+                Path('C:/Program Files (x86)/ProjectSuite/initialdata'),  # インストール先フォルダ
+                APP_ROOT / "initialdata"  # アプリケーションルートディレクトリ
+            ]
+            
+            for path in candidate_paths:
+                if path and path.exists():
+                    print(f"Debug: 代替データソースを発見: {path}")
+                    source_data = path
+                    break
+        
+        # 初期データ生成
+        print("初期データを生成しています...")
+        
+        # サブディレクトリの作成
+        for subdir in ["exports", "master", "projects", "templates"]:
+            target_subdir = target_data_dir / subdir
+            try:
+                target_subdir.mkdir(parents=True, exist_ok=True)
+                print(f"Debug: データサブディレクトリを作成しました: {target_subdir}")
+            except Exception as e:
+                print(f"Warning: データサブディレクトリ {subdir} の作成に失敗しました: {e}")
+                continue
+            
+            # initialdataフォルダからコピー(存在する場合)
+            if source_data.exists():
+                src_subdir = source_data / subdir
+                if src_subdir.exists():
+                    print(f"Debug: ソースサブディレクトリが存在します: {src_subdir}")
+                    for src_file in src_subdir.glob("**/*"):
+                        if src_file.is_file():
+                            try:
+                                rel_path = src_file.relative_to(src_subdir)
+                                dst_file = target_subdir / rel_path
+                                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                                if not dst_file.exists():  # 既存ファイルを上書きしない
+                                    print(f"Debug: ファイルをコピーします: {src_file} -> {dst_file}")
+                                    shutil.copy2(src_file, dst_file)
+                                    print(f"  コピー: {rel_path}")
+                                else:
+                                    print(f"Debug: ファイルは既に存在します: {dst_file}")
+                            except Exception as file_err:
+                                print(f"Warning: ファイルコピーエラー: {src_file} -> {file_err}")
+        
+        # 必要最小限のファイル作成
+        create_minimal_sample_files(target_data_dir)
+        
+        # initialdata自体はもう不要なので、処理が完了したら削除
+        if source_data.exists():
+            try:
+                shutil.rmtree(source_data)
+                print("一時データディレクトリを削除しました")
+            except Exception as e:
+                print(f"Warning: 一時データディレクトリの削除に失敗しました: {e}")
+            
+        # 初期化完了マークを作成
+        init_flag = target_dir / ".init_complete"
+        try:
+            with open(init_flag, 'w') as f:
+                f.write(datetime.now().isoformat())
+            print(f"Debug: 初期化完了マークを作成しました: {init_flag}")
+        except Exception as e:
+            print(f"Warning: 初期化完了マークの作成に失敗しました: {e}")
+        
+        print("初期データの配置が完了しました")
+        return True
+        
+    except Exception as e:
+        print(f"初期データ配置エラー: {e}")
+        traceback.print_exc()
+        return False
+
+def create_minimal_sample_files(target_dir):
+    """最小限必要なサンプルファイルを作成する"""
+    # データベースファイル
+    db_path = target_dir / "projects.db"
+    if not db_path.exists():
+        # 空のSQLiteデータベースファイルを作成
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        conn.close()
+        print(f"  空のデータベースを作成: {db_path}")
+    
+    # マスターデータ
+    master_dir = target_dir / "master"
+    master_dir.mkdir(parents=True, exist_ok=True)
+    factory_info = master_dir / "factory_info.csv"
+    if not factory_info.exists():
+        # 基本的なマスターデータを作成
+        with open(factory_info, 'w', encoding='utf-8') as f:
+            f.write("division_code,division_name,factory_code,factory_name,process_code,process_name,line_code,line_name\n")
+            f.write("D001,開発事業部,F001,第一工場,P001,組立工程,L001,組立ライン1\n")
+            f.write("D001,開発事業部,F001,第一工場,P001,組立工程,L002,組立ライン2\n")
+            f.write("D001,開発事業部,F002,第二工場,P002,検査工程,L003,検査ライン1\n")
+        print(f"  サンプルマスターデータを作成: {factory_info}")
+    
+    # エクスポートファイル
+    exports_dir = target_dir / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    dashboard_file = exports_dir / "dashboard.csv"
+    projects_file = exports_dir / "projects.csv"
+    if not dashboard_file.exists():
+        with open(dashboard_file, 'w', encoding='utf-8') as f:
+            f.write("project_id,project_name,manager,division,factory,process,line,status,created_at\n")
+        print(f"  空のダッシュボードファイルを作成: {dashboard_file}")
+    if not projects_file.exists():
+        with open(projects_file, 'w', encoding='utf-8') as f:
+            f.write("project_id,project_name,start_date,manager,reviewer,approver,division,factory,process,line,status,project_path,ganttchart_path,created_at,updated_at\n")
+        print(f"  空のプロジェクトファイルを作成: {projects_file}")
+    
+    # テンプレートファイル
+    templates_dir = target_dir / "templates"
+    templates_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir = templates_dir / "999. metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    with open(metadata_dir / "工程表作成補助アプリ_#案件名#.csv", 'w', encoding='utf-8') as f:
+        f.write("task_name,task_start_date,task_finish_date,task_status,task_milestone,task_assignee,task_work_hours\n")
+        f.write("サンプルタスク,2025-04-01,2025-04-30,未着手,計画,担当者名,8\n")
+    print(f"  基本テンプレートファイルを作成: {metadata_dir}")
+
 def setup_logging() -> None:
     """
     ログ設定を初期化する
@@ -67,13 +234,25 @@ def setup_logging() -> None:
     ログファイルとコンソールの両方に出力を設定
     """
     try:
-        # ログディレクトリの作成
-        log_dir = os.path.dirname(Config.LOG_FILE)
-        os.makedirs(log_dir, exist_ok=True)
+        # ユーザードキュメントフォルダ内にログディレクトリを作成
+        user_log_dir = Path.home() / "Documents" / "ProjectSuite" / "logs"
+        
+        # 明示的に例外処理を追加
+        try:
+            user_log_dir.mkdir(parents=True, exist_ok=True)
+            user_log_file = user_log_dir / "app.log"
+        except PermissionError as pe:
+            print(f"Warning: ログディレクトリの作成に権限がありません: {pe}")
+            # フォールバックとして一時ディレクトリを使用
+            import tempfile
+            user_log_dir = Path(tempfile.gettempdir()) / "ProjectSuite" / "logs"
+            user_log_dir.mkdir(parents=True, exist_ok=True)
+            user_log_file = user_log_dir / "app.log"
+            print(f"Info: 代替ログディレクトリを使用します: {user_log_dir}")
         
         # ログハンドラーの設定
         handlers = [
-            logging.FileHandler(Config.LOG_FILE, encoding='utf-8'),
+            logging.FileHandler(user_log_file, encoding='utf-8'),
             logging.StreamHandler(sys.stdout)
         ]
         
@@ -98,7 +277,10 @@ def setup_logging() -> None:
         
     except Exception as e:
         print(f"ログ設定の初期化に失敗しました: {e}")
-        raise
+        # ログ設定に失敗してもアプリケーションは継続する
+        # raise の代わりに標準出力のみに出力
+        import traceback
+        print(traceback.format_exc())
 
 def setup_environment() -> None:
     """
@@ -126,18 +308,9 @@ def setup_environment() -> None:
         if is_first_run:
             logging.info("初回起動を検出しました。データを移行します。")
             
-            # データ移行の実行
-            migrator = DataMigrator(registry)
+            # 初期データの配置を実行
+            initialize_sample_data()
             
-            # データのコピー
-            result = migrator.migrate_data()
-            
-            if result['success']:
-                logging.info(f"データ移行が完了しました。{result['copied_files']}ファイルをコピーしました。")
-                # 初期化完了マークを作成
-                registry.mark_initialization_complete()
-            else:
-                logging.error(f"データ移行に失敗しました: {result['error']}")
         else:
             logging.info("既存のユーザーデータディレクトリを使用します。")
         
@@ -322,9 +495,14 @@ def main() -> None:
     """
     # コマンドライン引数を解析
     if len(sys.argv) > 1:
-        app_name = sys.argv[1]
-        app_args = sys.argv[2:]
-        sys.exit(run_standalone_app(app_name, *app_args))
+        # 特殊コマンド：サンプルデータの初期化
+        if sys.argv[1] == "init-data":
+            success = initialize_sample_data()
+            sys.exit(0 if success else 1)
+        else:
+            app_name = sys.argv[1]
+            app_args = sys.argv[2:]
+            sys.exit(run_standalone_app(app_name, *app_args))
     
     # メインアプリケーション（ProjectManager）の起動
     db_manager = None

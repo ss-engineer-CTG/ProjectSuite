@@ -1,0 +1,118 @@
+'ThisWorkbook モジュールに配置
+Option Explicit
+' タスク日付を自動調整するサブルーチン
+Public Sub AdjustTaskDates()
+    On Error GoTo ErrorHandler
+
+    Dim ws As Worksheet
+    Dim firstStartDate As Date
+    Dim newStartDate As Date
+    Dim dateDiff As Long
+    Dim lastRow As Long
+    Dim i As Long
+
+    ' アクティブシートを設定
+    Set ws = ActiveSheet
+
+    ' 最終行を取得
+    lastRow = ws.Range("A" & ws.Rows.Count).End(xlUp).Row
+
+    ' データが2行未満の場合は終了
+    If lastRow < 2 Then
+        MsgBox "調整するデータがありません。", vbExclamation
+        Exit Sub
+    End If
+
+    ' 最初のタスクの開始日を取得
+    If IsDate(ws.Range("B2").Value) Then
+        firstStartDate = ws.Range("B2").Value
+    Else
+        MsgBox "最初のタスクの開始日が正しい日付形式ではありません。", vbExclamation
+        Exit Sub
+    End If
+
+    ' 現在の日付を取得
+    newStartDate = Date
+
+    ' 日付の差分を計算
+    dateDiff = Fix(newStartDate - firstStartDate)
+
+    ' 差分が0の場合は処理をスキップ
+    If dateDiff = 0 Then
+        MsgBox "日付の調整は必要ありません。", vbInformation
+        Exit Sub
+    End If
+
+    ' 変更前に確認メッセージを表示
+    If MsgBox("タスクの日付を " & dateDiff & " 日分調整しますか？" & vbCrLf & _
+              "（" & Format(firstStartDate, "yyyy/mm/dd") & " → " & _
+              Format(newStartDate, "yyyy/mm/dd") & "）", _
+              vbYesNo + vbQuestion, "日付調整の確認") = vbNo Then
+        Exit Sub
+    End If
+
+    ' 処理開始
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    ' シートの保護状態を確認し、必要に応じて解除
+    Dim isProtected As Boolean
+    isProtected = ws.ProtectContents
+    If isProtected Then ws.Unprotect
+
+    ' 全タスクの日付を調整
+    For i = 2 To lastRow
+        ' 開始日を調整
+        If IsDate(ws.Range("B" & i).Value) Then
+            ws.Range("B" & i).Value = DateAdd("d", dateDiff, ws.Range("B" & i).Value)
+        End If
+
+        ' 終了日を調整
+        If IsDate(ws.Range("C" & i).Value) Then
+            ws.Range("C" & i).Value = DateAdd("d", dateDiff, ws.Range("C" & i).Value)
+        End If
+    Next i
+
+    ' シートの保護状態を元に戻す
+    If isProtected Then ws.Protect
+
+CleanExit:
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+
+    ' 完了メッセージを表示
+    MsgBox "タスクの日付を " & dateDiff & " 日分調整しました。", _
+           vbInformation, "日付調整完了"
+    Exit Sub
+ErrorHandler:
+    MsgBox "エラーが発生しました。" & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical
+    Resume CleanExit
+End Sub
+' シートモジュールに配置するコード
+Private Sub Worksheet_Change(ByVal Target As Range)
+    On Error GoTo ErrorHandler
+
+    ' B2セル（最初のタスクの開始日）が変更された場合
+    If Not Intersect(Target, Range("B2")) Is Nothing Then
+        ' 再帰的な呼び出しを防ぐために、イベントを無効化
+        Application.EnableEvents = False
+
+        ' セルが空でなく、かつ日付形式である場合のみ実行
+        If Not IsEmpty(Range("B2").Value) And IsDate(Range("B2").Value) Then
+            ' 日付調整マクロを実行
+            AdjustTaskDates
+        End If
+    End If
+CleanExit:
+    ' イベントを再度有効化
+    Application.EnableEvents = True
+    Exit Sub
+ErrorHandler:
+    MsgBox "エラーが発生しました。" & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical
+    Resume CleanExit
+End Sub
+

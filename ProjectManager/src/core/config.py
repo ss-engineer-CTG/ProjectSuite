@@ -42,22 +42,22 @@ class Config:
     ]
     
     # マスターディレクトリ
-    MASTER_DIR = DATA_DIR / 'master'
+    MASTER_DIR = USER_DOC_DIR / "ProjectManager" / "data" / 'master'
     
     # マスタデータファイル
     MASTER_DATA_FILE = MASTER_DIR / 'factory_info.csv'
     
     # データベース設定
-    DB_PATH = DATA_DIR / 'projects.db'
+    DB_PATH = USER_DOC_DIR / "ProjectManager" / "data" / 'projects.db'
     
     # マスターフォルダのパス
-    MASTER_FOLDER = DATA_DIR / 'templates' / 'project'
+    MASTER_FOLDER = USER_DOC_DIR / "ProjectManager" / "data" / 'templates' / 'project'
     
     # 出力先ベースディレクトリ
-    OUTPUT_BASE_DIR = DATA_DIR / 'projects'
+    OUTPUT_BASE_DIR = USER_DOC_DIR / "ProjectManager" / "data" / 'projects'
     
     # ダッシュボードCSV出力設定
-    DASHBOARD_EXPORT_DIR = DATA_DIR / 'exports'
+    DASHBOARD_EXPORT_DIR = USER_DOC_DIR / "ProjectManager" / "data" / 'exports'
     DASHBOARD_EXPORT_FILE = DASHBOARD_EXPORT_DIR / 'dashboard.csv'
     PROJECTS_EXPORT_FILE = DASHBOARD_EXPORT_DIR / 'projects.csv'
     
@@ -65,8 +65,8 @@ class Config:
     METADATA_FOLDER_NAME = "999. metadata"
     TASK_FILE_NAME = "tasks.csv"
     
-    # ログファイルパス (ログはアプリケーションディレクトリに保存)
-    LOG_FILE = ROOT_DIR / 'logs' / 'app.log'
+    # ログファイルパス (ログはユーザードキュメントディレクトリに保存)
+    LOG_FILE = USER_DOC_DIR / 'logs' / 'app.log'
     
     # ログ設定
     LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
@@ -84,11 +84,11 @@ class Config:
     DOCUMENT_PROCESSOR = {
         'template_dir': MASTER_FOLDER,
         'output_dir': OUTPUT_BASE_DIR,
-        'temp_dir': DATA_DIR / 'temp',
+        'temp_dir': USER_DOC_DIR / 'temp',
         'supported_extensions': ['.doc', '.docx', '.xls', '.xlsx', '.xlsm'],
         'default_encoding': 'utf-8',
         'backup_enabled': True,
-        'backup_dir': DATA_DIR / 'backup'
+        'backup_dir': USER_DOC_DIR / 'backup'
     }
     
     @classmethod
@@ -159,7 +159,8 @@ class Config:
             cls.OUTPUT_BASE_DIR,
             cls.DASHBOARD_EXPORT_DIR,
             cls.DOCUMENT_PROCESSOR['temp_dir'],
-            cls.DOCUMENT_PROCESSOR['backup_dir']
+            cls.DOCUMENT_PROCESSOR['backup_dir'],
+            cls.LOG_FILE.parent
         ]
         
         for directory in directories:

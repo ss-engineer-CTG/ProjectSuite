@@ -52,9 +52,12 @@ class PathRegistry:
         if self.is_frozen:
             # PyInstallerで実行ファイル化した場合
             self.root_dir = Path(sys._MEIPASS).parent
+            # 実行ファイルのパスも取得
+            self.exe_dir = Path(sys.executable).parent
         else:
             # 通常実行時は現在のスクリプトの位置から判断
             self.root_dir = self._find_project_root()
+            self.exe_dir = self.root_dir
         
         # ユーザードキュメントのProjectSuiteディレクトリを設定
         self.user_data_dir = Path.home() / "Documents" / "ProjectSuite"
@@ -95,12 +98,12 @@ class PathRegistry:
         Returns:
             bool: 初回起動の場合はTrue
         """
-        init_flag = self.data_dir / self.INIT_FLAG_FILE
+        init_flag = self.user_data_dir / self.INIT_FLAG_FILE
         return not init_flag.exists()
     
     def mark_initialization_complete(self) -> None:
         """初期化完了をマークする"""
-        init_flag = self.data_dir / self.INIT_FLAG_FILE
+        init_flag = self.user_data_dir / self.INIT_FLAG_FILE
         try:
             # マークファイルの作成
             with open(init_flag, 'w') as f:
@@ -149,20 +152,23 @@ class PathRegistry:
     
     def _setup_base_paths(self):
         """基本パスの設定"""
+        # 常にユーザードキュメントフォルダを優先するように
+        user_pm_data_dir = self.user_data_dir / "ProjectManager" / "data"
+        
         # 共通ディレクトリ構造
         self._paths.update({
             "ROOT": str(self.root_dir),
-            "DATA_DIR": str(self.data_dir),
-            "LOGS_DIR": str(self.root_dir / "logs"),  # ログはアプリケーションディレクトリに保持
-            "EXPORTS_DIR": str(self.data_dir / "exports"),
-            "TEMPLATES_DIR": str(self.data_dir / "templates"),
-            "PROJECTS_DIR": str(self.data_dir / "projects"),
-            "MASTER_DIR": str(self.data_dir / "master"),
-            "TEMP_DIR": str(self.data_dir / "temp"),
-            "BACKUP_DIR": str(self.data_dir / "backup"),
-            "DB_PATH": str(self.data_dir / "projects.db"),
-            "DASHBOARD_FILE": str(self.data_dir / "exports" / "dashboard.csv"),
-            "PROJECTS_FILE": str(self.data_dir / "exports" / "projects.csv"),
+            "DATA_DIR": str(self.user_data_dir),
+            "LOGS_DIR": str(self.user_data_dir / "logs"),  # ユーザードキュメントに変更
+            "EXPORTS_DIR": str(user_pm_data_dir / "exports"),
+            "TEMPLATES_DIR": str(user_pm_data_dir / "templates"),
+            "PROJECTS_DIR": str(user_pm_data_dir / "projects"),
+            "MASTER_DIR": str(user_pm_data_dir / "master"),
+            "TEMP_DIR": str(self.user_data_dir / "temp"),
+            "BACKUP_DIR": str(self.user_data_dir / "backup"),
+            "DB_PATH": str(user_pm_data_dir / "projects.db"),
+            "DASHBOARD_FILE": str(user_pm_data_dir / "exports" / "dashboard.csv"),
+            "PROJECTS_FILE": str(user_pm_data_dir / "exports" / "projects.csv"),
         })
         
         # 各アプリのパス
@@ -173,7 +179,7 @@ class PathRegistry:
         """設定ファイルからパス情報を読み込む"""
         # 複数の可能性のある場所を検索
         config_locations = [
-            self.data_dir / self.CONFIG_FILE,  # ユーザードキュメントフォルダ
+            self.user_data_dir / self.CONFIG_FILE,  # ユーザードキュメントフォルダを優先
             self.root_dir / self.CONFIG_FILE,
             self.root_dir / "config" / self.CONFIG_FILE,
             Path.home() / "ProjectManagerSuite" / self.CONFIG_FILE
@@ -215,9 +221,9 @@ class PathRegistry:
                 logger.info(f"Path overridden from special environment variable: {path_key}={os.environ[env_var]}")
         
         # 環境変数に重要なパスを設定（他のコンポーネントから参照可能に）
-        os.environ["PMSUITE_DATA_DIR"] = str(self.data_dir)
-        os.environ["PMSUITE_DB_PATH"] = str(self.data_dir / "projects.db")
-        os.environ["PMSUITE_DASHBOARD_FILE"] = str(self.data_dir / "exports" / "dashboard.csv")
+        os.environ["PMSUITE_DATA_DIR"] = str(self.user_data_dir)
+        os.environ["PMSUITE_DB_PATH"] = str(self.user_data_dir / "ProjectManager" / "data" / "projects.db")
+        os.environ["PMSUITE_DASHBOARD_FILE"] = str(self.user_data_dir / "ProjectManager" / "data" / "exports" / "dashboard.csv")
     
     def get_path(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """
@@ -314,8 +320,10 @@ class PathRegistry:
             
             # 3. 共通のフォールバックディレクトリをチェック
             fallback_locations = [
+                self.user_data_dir,  # まずユーザーデータディレクトリを優先
+                self.user_data_dir / "ProjectManager" / "data",
                 self.root_dir,
-                self.data_dir,
+                self.exe_dir / "sampledata",
                 Path.home() / "Documents" / "ProjectSuite",
                 Path.home() / "ProjectManagerSuite",
                 Path.home() / "Documents" / "ProjectManagerSuite",
@@ -530,7 +538,8 @@ class PathRegistry:
             bool: 成功したらTrue
         """
         if path is None:
-            path = self.data_dir / self.CONFIG_FILE
+            # ユーザードキュメントディレクトリに保存
+            path = self.user_data_dir / self.CONFIG_FILE
         
         try:
             # 親ディレクトリが存在しない場合は作成
@@ -562,15 +571,21 @@ class PathRegistry:
         """
         # 検索場所のリスト（優先順位順）
         potential_paths = [
-            # アプリケーションのデータディレクトリ
+            # 最優先: ユーザーのドキュメントフォルダ
+            Path.home() / "Documents" / "ProjectSuite" / "ProjectManager" / "data",
+            
+            # 次に: サンプルデータフォルダ
+            self.root_dir / "sampledata",
+            self.exe_dir / "sampledata",
+            
+            # 次に: アプリケーションのデータディレクトリ
             self.root_dir / "data",
             
-            # ProjectManagerのデータディレクトリ（複数の可能性）
+            # 次に: ProjectManagerのデータディレクトリ
             self.root_dir / "ProjectManager" / "data",
             Path(os.getcwd()) / "ProjectManager" / "data",
             
-            # 開発環境でよく使われるパス
-            Path.home() / "Documents" / "Projects" / "ProjectSuite" / "ProjectManager" / "data",
+            # 最後に: その他の一般的な場所
             Path.home() / "Projects" / "ProjectSuite" / "ProjectManager" / "data"
         ]
         

@@ -60,7 +60,10 @@ block_cipher = None
 datas = [
     ('defaults.txt', '.'),
     ('PathRegistry.py', '.'),
+    ('app.manifest', '.'),
 ]
+
+# initialdata は組み込まない - インストーラーで別途コピーする
 
 # プロジェクトマネージャーのソースファイルがある場合
 if os.path.exists('ProjectManager/src'):
@@ -118,6 +121,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='resources/icon.ico' if os.path.exists('resources/icon.ico') else None,
+    manifest='app.manifest',
+    uac_admin=True,
 )
 
 coll = COLLECT(
@@ -166,6 +172,43 @@ def copy_additional_files():
         if not Path(empty_file).exists():
             Path(empty_file).touch()
             print(f"空のファイルを作成: {empty_file}")
+    
+    # initialdata フォルダをインストーラーディレクトリにコピー
+    if Path('initialdata').exists():
+        installer_dir = Path('installer')
+        installer_dir.mkdir(parents=True, exist_ok=True)
+        
+        target_dir = installer_dir / 'initialdata'
+        
+        # ディレクトリが既に存在する場合は、安全に削除を試みる
+        if target_dir.exists():
+            try:
+                # 削除前に読み取り専用属性を解除する
+                def remove_readonly(func, path, _):
+                    """読み取り専用属性を解除する関数"""
+                    try:
+                        # 属性を変更してから再試行
+                        import stat
+                        os.chmod(path, stat.S_IWRITE)
+                        func(path)
+                    except Exception as e:
+                        print(f"Warning: {path} の削除に失敗しました: {e}")
+
+                shutil.rmtree(target_dir, onerror=remove_readonly)
+                print(f"既存の初期データフォルダを削除しました: {target_dir}")
+            except Exception as e:
+                print(f"Warning: 初期データフォルダの削除に失敗しました: {e}")
+                print("削除をスキップして続行します...")
+        
+        try:
+            # コピー処理
+            shutil.copytree('initialdata', target_dir, dirs_exist_ok=True)
+            print(f"初期データフォルダをインストーラーディレクトリにコピー: {target_dir}")
+        except Exception as e:
+            print(f"Warning: 初期データフォルダのコピーに失敗しました: {e}")
+            print("既存のファイルを使用して続行します...")
+    else:
+        print("警告: initialdata フォルダが見つかりません。初期データなしでビルドされます。")
     
     print("追加ファイルのコピー完了")
 
@@ -236,19 +279,28 @@ Compression=lzma
 SolidCompression=yes
 
 [Files]
+; アプリケーションファイル
 Source: "{rel_exe_path}"; DestDir: "{{app}}"; Flags: ignoreversion
 Source: "{rel_source_dir}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; サンプルデータをユーザードキュメントフォルダにコピー
+Source: "initialdata\\*"; DestDir: "{{userappdata}}\\..\\Documents\\ProjectSuite\\initialdata"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
 Name: "{{app}}\\ProjectManager\\data\\projects"; Permissions: users-modify
 Name: "{{app}}\\ProjectManager\\data\\exports"; Permissions: users-modify
 Name: "{{app}}\\ProjectManager\\logs"; Permissions: users-modify
+Name: "{{userappdata}}\\..\\Documents\\ProjectSuite"; Permissions: users-modify
 
 [Icons]
 Name: "{{group}}\\ProjectSuite"; Filename: "{{app}}\\ProjectSuite.exe"
 Name: "{{commondesktop}}\\ProjectSuite"; Filename: "{{app}}\\ProjectSuite.exe"
 
 [Run]
+; インストール完了後にinitialdata処理を実行
+Filename: "{{app}}\\ProjectSuite.exe"; Parameters: "init-data"; Description: "初期データ設定"; Flags: runhidden nowait postinstall
+
+; 通常のアプリ起動
 Filename: "{{app}}\\ProjectSuite.exe"; Description: "Launch ProjectSuite"; Flags: nowait postinstall skipifsilent
 """
     

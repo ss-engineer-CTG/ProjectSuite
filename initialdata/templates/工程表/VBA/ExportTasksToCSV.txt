@@ -1,0 +1,168 @@
+' メタデータフォルダのパスを取得する関数
+Function GetMetadataFolderPath() As String
+    Const METADATA_FOLDER_NAME As String = "999. metadata"
+    Dim currentPath As String
+    Dim parentPath As String
+    
+    ' カレントブックのパスを取得
+    If ThisWorkbook.path = "" Then
+        MsgBox "ブックが保存されていません。先に保存してください。", vbExclamation
+        GetMetadataFolderPath = ""
+        Exit Function
+    End If
+    
+    currentPath = ThisWorkbook.path
+    
+    ' 上位フォルダを探索（最大10階層まで）
+    Dim i As Integer
+    For i = 1 To 10
+        ' メタデータフォルダの存在確認
+        If Dir(currentPath & "\" & METADATA_FOLDER_NAME, vbDirectory) <> "" Then
+            GetMetadataFolderPath = currentPath & "\" & METADATA_FOLDER_NAME & "\"
+            Exit Function
+        End If
+        
+        ' 親フォルダのパスを取得
+        parentPath = GetParentFolderPath(currentPath)
+        
+        ' ルートディレクトリに到達した場合は終了
+        If parentPath = "" Or parentPath = currentPath Then
+            Exit For
+        End If
+        
+        currentPath = parentPath
+    Next i
+    
+    ' メタデータフォルダが見つからない場合
+    GetMetadataFolderPath = ""
+End Function
+
+' 親フォルダのパスを取得する関数
+Function GetParentFolderPath(ByVal path As String) As String
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    On Error Resume Next
+    GetParentFolderPath = fso.GetParentFolderName(path)
+    On Error GoTo 0
+    
+    Set fso = Nothing
+End Function
+
+Sub ExportTasksToCSV()
+    On Error GoTo ErrorHandler
+    
+    ' 警告メッセージを非表示に設定
+    Application.DisplayAlerts = False
+    
+    ' 入力シートの取得
+    Dim wsInput As Worksheet
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Worksheets("入力")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        MsgBox "「入力」シートが見つかりません。シート名を確認してください。", vbExclamation
+        Exit Sub
+    End If
+    
+    ' データ範囲の確認
+    Dim lastRow As Long
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    If lastRow < 2 Then
+        MsgBox "入力データが見つかりません。", vbExclamation
+        Exit Sub
+    End If
+    
+    ' メタデータフォルダのパスを取得
+    Dim savePath As String
+    savePath = GetMetadataFolderPath()
+    
+    If savePath = "" Then
+        MsgBox "メタデータフォルダ（999. metadata）が見つかりませんでした。", vbExclamation
+        Exit Sub
+    End If
+    
+    ' プロジェクト名の抽出
+    Dim projectName As String
+    projectName = ExtractProjectName(ThisWorkbook.Name)
+    
+    ' ファイル名とパスの設定
+    Dim outputPath As String
+    Dim fileName As String
+    
+    ' カレントブックのファイル名を取得（拡張子なし）
+    fileName = Left(ThisWorkbook.Name, InStrRev(ThisWorkbook.Name, ".") - 1) & ".csv"
+    outputPath = savePath & fileName
+    
+    ' CSVファイルを作成
+    Dim fileNum As Integer
+    fileNum = FreeFile
+    
+    Open outputPath For Output As #fileNum
+    
+    ' ヘッダー行の出力（マイルストーン列を追加）
+    Print #fileNum, "task_name,task_start_date,task_finish_date,task_status,task_milestone,project_name"
+    
+    ' データ行の出力
+    Dim i As Long
+    For i = 2 To lastRow
+        Dim taskName As String
+        Dim startDate As String
+        Dim finishDate As String
+        Dim status As String
+        Dim milestone As String
+        
+        ' データの取得と整形
+        taskName = Replace(wsInput.Cells(i, 1).Value, ",", "")  ' カンマをエスケープ
+        startDate = Format(wsInput.Cells(i, 2).Value, "yyyy/mm/dd")
+        finishDate = Format(wsInput.Cells(i, 3).Value, "yyyy/mm/dd")
+        status = Replace(wsInput.Cells(i, 4).Value, ",", "")    ' カンマをエスケープ
+        milestone = Replace(wsInput.Cells(i, 5).Value, ",", "") ' マイルストーン列（E列）のデータを取得
+        
+        ' CSV行の作成と出力（マイルストーンを追加）
+        Print #fileNum, taskName & "," & startDate & "," & finishDate & "," & status & "," & milestone & "," & projectName
+    Next i
+    
+    ' ファイルを閉じる
+    Close #fileNum
+    
+    ' 成功メッセージ
+    MsgBox "CSVファイルを作成しました。" & vbNewLine & _
+           "保存先: " & outputPath, vbInformation
+    
+    ' 警告メッセージを再有効化
+    Application.DisplayAlerts = True
+    Exit Sub
+ErrorHandler:
+    ' エラー処理
+    If fileNum > 0 Then
+        Close #fileNum
+    End If
+    Application.DisplayAlerts = True
+    MsgBox "エラーが発生しました: " & Err.Description, vbCritical
+End Sub
+
+' プロジェクト名を抽出する関数
+Function ExtractProjectName(ByVal fileName As String) As String
+    Dim nameParts() As String
+    Dim baseFileName As String
+    
+    ' 拡張子を除去
+    baseFileName = Left(fileName, InStrRev(fileName, ".") - 1)
+    
+    ' アンダースコアで分割
+    nameParts = Split(baseFileName, "_")
+    
+    ' 最後の部分を取得
+    If UBound(nameParts) >= 1 Then
+        ExtractProjectName = nameParts(UBound(nameParts))
+    Else
+        ' アンダースコアがない場合は空文字を返す
+        ExtractProjectName = ""
+    End If
+End Function
+
+
+
