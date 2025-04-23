@@ -53,8 +53,35 @@ class Config:
     # マスターフォルダのパス
     MASTER_FOLDER = USER_DOC_DIR / "ProjectManager" / "data" / 'templates' / 'project'
     
-    # 出力先ベースディレクトリ
-    OUTPUT_BASE_DIR = USER_DOC_DIR / "ProjectManager" / "data" / 'projects'
+    # 出力先ベースディレクトリ（動的に解決）
+    @classmethod
+    def get_output_base_dir(cls):
+        """
+        出力先ベースディレクトリを取得
+        
+        Returns:
+            Path: 出力先ベースディレクトリのパス
+        """
+        try:
+            from PathRegistry import PathRegistry
+            registry = PathRegistry.get_instance()
+            
+            # PROJECTS_DIR または OUTPUT_BASE_DIR を検索
+            for key in ["PROJECTS_DIR", "OUTPUT_BASE_DIR"]:
+                projects_dir = registry.get_path(key)
+                if projects_dir:
+                    return Path(projects_dir)
+            
+            # カスタムパスが設定されていない場合はデフォルトパスを返す
+            return cls.USER_DOC_DIR / "ProjectManager" / "data" / 'projects'
+        except ImportError:
+            # PathRegistryが使えない場合はデフォルトパスを返す
+            return cls.USER_DOC_DIR / "ProjectManager" / "data" / 'projects'
+    
+    # プロパティとして定義
+    @property
+    def OUTPUT_BASE_DIR(self):
+        return self.get_output_base_dir()
     
     # ダッシュボードCSV出力設定
     DASHBOARD_EXPORT_DIR = USER_DOC_DIR / "ProjectManager" / "data" / 'exports'
@@ -83,7 +110,7 @@ class Config:
     # ドキュメント処理関連の設定
     DOCUMENT_PROCESSOR = {
         'template_dir': MASTER_FOLDER,
-        'output_dir': OUTPUT_BASE_DIR,
+        'output_dir': None,  # 動的に解決されるため初期値はNone
         'temp_dir': USER_DOC_DIR / 'temp',
         'supported_extensions': ['.doc', '.docx', '.xls', '.xlsx', '.xlsm'],
         'default_encoding': 'utf-8',
@@ -120,15 +147,19 @@ class Config:
         registry = PathRegistry.get_instance()
         
         # 基本パス登録
-        registry.register_path("DATA_DIR", cls.DATA_DIR)
-        registry.register_path("MASTER_DIR", cls.MASTER_DIR)
-        registry.register_path("MASTER_FOLDER", cls.MASTER_FOLDER)
-        registry.register_path("OUTPUT_BASE_DIR", cls.OUTPUT_BASE_DIR)
-        registry.register_path("DASHBOARD_EXPORT_DIR", cls.DASHBOARD_EXPORT_DIR)
-        registry.register_path("DASHBOARD_EXPORT_FILE", cls.DASHBOARD_EXPORT_FILE)
-        registry.register_path("PROJECTS_EXPORT_FILE", cls.PROJECTS_EXPORT_FILE)
-        registry.register_path("DB_PATH", cls.DB_PATH)
-        registry.register_path("LOG_FILE", cls.LOG_FILE)
+        registry.register_path("DATA_DIR", str(cls.DATA_DIR))
+        registry.register_path("MASTER_DIR", str(cls.MASTER_DIR))
+        registry.register_path("MASTER_FOLDER", str(cls.MASTER_FOLDER))
+        
+        # 出力ディレクトリは動的に解決
+        output_dir = cls.get_output_base_dir()
+        registry.register_path("OUTPUT_BASE_DIR", str(output_dir))
+        
+        registry.register_path("DASHBOARD_EXPORT_DIR", str(cls.DASHBOARD_EXPORT_DIR))
+        registry.register_path("DASHBOARD_EXPORT_FILE", str(cls.DASHBOARD_EXPORT_FILE))
+        registry.register_path("PROJECTS_EXPORT_FILE", str(cls.PROJECTS_EXPORT_FILE))
+        registry.register_path("DB_PATH", str(cls.DB_PATH))
+        registry.register_path("LOG_FILE", str(cls.LOG_FILE))
         
         # 環境変数にも登録
         os.environ["PMSUITE_DASHBOARD_FILE"] = str(cls.DASHBOARD_EXPORT_FILE)
@@ -151,12 +182,15 @@ class Config:
         for directory in directories:
             registry.ensure_directory(directory)
             
+        # ドキュメント処理設定の出力先を更新
+        cls.DOCUMENT_PROCESSOR['output_dir'] = output_dir
+            
         # 従来の方法でも作成（後方互換性のため）
         directories = [
             cls.DATA_DIR,
             cls.MASTER_DIR,
             cls.MASTER_FOLDER,
-            cls.OUTPUT_BASE_DIR,
+            output_dir,
             cls.DASHBOARD_EXPORT_DIR,
             cls.DOCUMENT_PROCESSOR['temp_dir'],
             cls.DOCUMENT_PROCESSOR['backup_dir'],
@@ -227,18 +261,18 @@ class Config:
         issues = []
         
         # マスタデータファイルの存在確認
-        master_data_file = registry.get_path("MASTER_DATA_FILE", cls.MASTER_DATA_FILE)
+        master_data_file = registry.get_path("MASTER_DATA_FILE", str(cls.MASTER_DATA_FILE))
         if not Path(master_data_file).exists():
             issues.append(f"マスタデータファイルが見つかりません: {master_data_file}")
         
         # マスターテンプレートフォルダの存在確認
-        master_folder = registry.get_path("MASTER_FOLDER", cls.MASTER_FOLDER)
+        master_folder = registry.get_path("MASTER_FOLDER", str(cls.MASTER_FOLDER))
         if not Path(master_folder).exists():
             issues.append(f"マスターテンプレートフォルダが見つかりません: {master_folder}")
         
         # プロジェクト出力ディレクトリの存在確認と作成
-        output_dir = registry.get_path("OUTPUT_BASE_DIR", cls.OUTPUT_BASE_DIR)
-        if not Path(output_dir).exists():
+        output_dir = cls.get_output_base_dir()
+        if not output_dir.exists():
             try:
                 os.makedirs(output_dir)
                 logging.info(f"プロジェクト出力ディレクトリを作成しました: {output_dir}")
@@ -246,7 +280,7 @@ class Config:
                 issues.append(f"プロジェクト出力ディレクトリの作成に失敗しました: {e}")
             
         # 書き込み権限の確認
-        data_dir = registry.get_path("DATA_DIR", cls.DATA_DIR)
+        data_dir = registry.get_path("DATA_DIR", str(cls.DATA_DIR))
         try:
             test_file = Path(data_dir) / '.write_test'
             test_file.touch()
@@ -269,10 +303,9 @@ class Config:
         Returns:
             Path: メタデータディレクトリのパス
         """
-        # PathRegistryを使用
-        registry = PathRegistry.get_instance()
-        output_dir = registry.get_path("OUTPUT_BASE_DIR", cls.OUTPUT_BASE_DIR)
-        return Path(output_dir) / project_name / cls.METADATA_FOLDER_NAME
+        # 出力先を動的に解決
+        output_dir = cls.get_output_base_dir()
+        return output_dir / project_name / cls.METADATA_FOLDER_NAME
 
     @classmethod
     def get_project_task_file_path(cls, project_name: str) -> Path:
@@ -298,11 +331,14 @@ class Config:
         # PathRegistryから最新の値を取得
         registry = PathRegistry.get_instance()
         
+        # 出力先を動的に解決
+        output_dir = cls.get_output_base_dir()
+        
         return {
             'base_dir': registry.get_path("ROOT", str(cls.ROOT_DIR)),
             'data_dir': registry.get_path("DATA_DIR", str(cls.DATA_DIR)),
             'master_dir': registry.get_path("MASTER_DIR", str(cls.MASTER_DIR)),
-            'output_dir': registry.get_path("OUTPUT_BASE_DIR", str(cls.OUTPUT_BASE_DIR)),
+            'output_dir': str(output_dir),
             'db_path': registry.get_path("DB_PATH", str(cls.DB_PATH)),
             'log_file': registry.get_path("LOG_FILE", str(cls.LOG_FILE)),
             'document_processor': cls.DOCUMENT_PROCESSOR

@@ -75,10 +75,28 @@ class DocumentProcessor:
         """一時ディレクトリの初期化"""
         try:
             # ユーザードキュメント内のtempディレクトリを使用
-            user_temp_dir = Path.home() / "Documents" / "ProjectSuite" / "temp"
-            user_temp_dir.mkdir(parents=True, exist_ok=True)
-            self.temp_dir = user_temp_dir
-            self.logger.info(f"一時ディレクトリを作成しました: {self.temp_dir}")
+            user_temp_dir = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "temp"
+            
+            # PathRegistryから取得を試みる
+            try:
+                from PathRegistry import PathRegistry
+                registry = PathRegistry.get_instance()
+                registry_path = registry.get_path("CPL_TEMP_DIR")
+                if registry_path:
+                    user_temp_dir = Path(registry_path)
+            except ImportError:
+                pass
+            
+            # ディレクトリ作成
+            try:
+                user_temp_dir.mkdir(parents=True, exist_ok=True)
+                self.temp_dir = user_temp_dir
+                self.logger.info(f"一時ディレクトリを作成しました: {self.temp_dir}")
+            except PermissionError:
+                # 権限エラーの場合はシステム一時ディレクトリを使用
+                self.temp_dir = Path(tempfile.mkdtemp(prefix="doc_processor_"))
+                self.logger.warning(f"権限エラーのため、システム一時ディレクトリを使用: {self.temp_dir}")
+            
         except Exception as e:
             self.logger.error(f"一時ディレクトリ作成エラー: {e}")
             # フォールバックとしてsys.tempを使用

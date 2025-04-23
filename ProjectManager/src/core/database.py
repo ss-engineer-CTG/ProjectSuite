@@ -376,14 +376,16 @@ class DatabaseManager:
             folder_name = '_'.join(filter(None, folder_components))
             folder_name = re.sub(r'[<>:"/\\|?*]', '_', folder_name)
             
-            project_folder = Config.OUTPUT_BASE_DIR / folder_name
+            # 出力先ディレクトリの取得（動的に解決）
+            output_base_dir = Config.get_output_base_dir()
+            project_folder = output_base_dir / folder_name
             
             # フォルダが既に存在する場合は連番を付与
             base_folder_name = folder_name
             counter = 1
             while project_folder.exists():
                 folder_name = f"{base_folder_name}_{counter}"
-                project_folder = Config.OUTPUT_BASE_DIR / folder_name
+                project_folder = output_base_dir / folder_name
                 counter += 1
             
             # プロジェクトフォルダのみを作成

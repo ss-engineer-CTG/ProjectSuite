@@ -15,7 +15,6 @@ from ProjectManager.src.services.gantt_updater import GanttChartUpdater
 from ProjectManager.src.services.task_loader import TaskLoader
 from ProjectManager.src.ui.styles.color_scheme import ColorScheme
 from ProjectManager.src.integration.document_processor_manager import DocumentProcessorManager
-# dashboard_connector import の削除
 from CreateProjectList.gui.main_window.document_processor_gui import DocumentProcessorGUI
 
 class DashboardGUI:
@@ -40,8 +39,6 @@ class DashboardGUI:
         
         # ドキュメント処理マネージャー
         self.doc_processor_manager = None
-        
-        # dashboard_connector 初期化部分を削除
         
         # フォント設定
         self.default_font = ("Meiryo", 12)
@@ -83,7 +80,7 @@ class DashboardGUI:
                 'base_dir': str(Config.DATA_DIR),
                 'db_path': str(Config.DB_PATH),
                 'master_dir': str(Config.MASTER_DIR),
-                'output_dir': str(Config.OUTPUT_BASE_DIR)
+                'output_dir': str(Config.get_output_base_dir())
             }
             self.doc_processor_manager = DocumentProcessorManager(config)
             logging.info("ドキュメント処理マネージャーを初期化しました")
@@ -176,7 +173,18 @@ class DashboardGUI:
         )
         update_button.pack(side="left", padx=(0, 10))
         
-        # ダッシュボード表示・終了ボタンを削除
+        # 設定ボタン
+        settings_button = ctk.CTkButton(
+            filter_frame,
+            text="設定",
+            command=self.show_settings_dialog,
+            font=self.default_font,
+            fg_color=self.colors.BUTTON_PRIMARY,
+            text_color=self.colors.BUTTON_TEXT,
+            hover_color=self.colors.BUTTON_HOVER,
+            width=80
+        )
+        settings_button.pack(side="left", padx=(0, 10))
         
         # ドキュメント処理ボタン
         doc_process_button = ctk.CTkButton(
@@ -257,9 +265,28 @@ class DashboardGUI:
 
         self.main_frame = main_frame
 
-    # show_dashboard メソッドを削除
-    
-    # close_dashboard メソッドを削除
+    def show_settings_dialog(self):
+        """設定ダイアログを表示"""
+        try:
+            from ProjectManager.src.ui.project_path_dialog import ProjectPathDialog
+            ProjectPathDialog(self.window, self.on_settings_changed)
+        except Exception as e:
+            logging.error(f"設定ダイアログの表示に失敗しました: {e}")
+            messagebox.showerror("エラー", f"設定ダイアログの表示に失敗しました: {e}")
+
+    def on_settings_changed(self):
+        """設定変更後のコールバック"""
+        try:
+            # 必要に応じてパスの再読み込みや画面更新を行う
+            logging.info("設定が変更されました。アプリケーションの再起動が必要です。")
+            messagebox.showinfo(
+                "設定変更",
+                "プロジェクトフォルダ設定を変更しました。\n"
+                "変更を完全に適用するには、アプリケーションを再起動してください。"
+            )
+        except Exception as e:
+            logging.error(f"設定変更の適用に失敗しました: {e}")
+            messagebox.showerror("エラー", f"設定変更の適用に失敗しました: {e}")
 
     def create_project_card(self, project):
         """
@@ -417,7 +444,7 @@ class DashboardGUI:
                 'base_dir': str(Config.DATA_DIR),
                 'db_path': str(Config.DB_PATH),
                 'master_dir': str(Config.MASTER_DIR),
-                'output_dir': str(Config.OUTPUT_BASE_DIR)
+                'output_dir': str(Config.get_output_base_dir())
             }
 
             # DocumentProcessorManagerがない場合は初期化
@@ -547,8 +574,6 @@ class DashboardGUI:
     def on_project_created(self):
         """プロジェクト作成後のコールバック"""
         self.refresh_projects()
-        
-        # ダッシュボードデータの更新コード削除
             
         if self.project_dialog:
             self.project_dialog.window.destroy()
@@ -557,8 +582,6 @@ class DashboardGUI:
     def on_project_updated(self):
         """プロジェクト更新後のコールバック"""
         self.refresh_projects()
-        
-        # ダッシュボードデータの更新コード削除
             
         if self.project_dialog:
             self.project_dialog.window.destroy()
@@ -579,8 +602,6 @@ class DashboardGUI:
                     self.select_project(None)
                 else:
                     self.refresh_projects()
-                
-                # ダッシュボードデータの更新コード削除
                     
                 messagebox.showinfo("成功", "プロジェクトを削除しました。")
             except Exception as e:
@@ -618,8 +639,6 @@ class DashboardGUI:
             updater = GanttChartUpdater(self.db_manager)
             stats = updater.update_ganttchart_paths()
             
-            # ダッシュボード更新部分を削除
-            
             # 結果メッセージの作成
             message = (
                 f"データベース更新が完了しました\n\n"
@@ -651,8 +670,6 @@ class DashboardGUI:
         try:
             logging.debug("アプリケーション終了処理を開始")
             self.is_closing = True
-            
-            # ダッシュボード終了処理を削除
             
             # ドキュメント処理マネージャーのクリーンアップ
             if self.doc_processor_manager:

@@ -7,20 +7,27 @@ OutputDir=installer
 OutputBaseFilename=ProjectSuite_Setup_2025_04_23
 Compression=lzma
 SolidCompression=yes
+PrivilegesRequired=lowest
 
 [Files]
 ; アプリケーションファイル
 Source: "dist\\ProjectSuite\\ProjectSuite.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\\ProjectSuite\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; サンプルデータをユーザードキュメントフォルダにコピー
-Source: "initialdata\*"; DestDir: "{userappdata}\..\Documents\ProjectSuite\initialdata"; Flags: ignoreversion recursesubdirs createallsubdirs
+; initialdataコピー処理はPythonコードで実行するため削除
 
 [Dirs]
-Name: "{app}\ProjectManager\data\projects"; Permissions: users-modify
-Name: "{app}\ProjectManager\data\exports"; Permissions: users-modify
-Name: "{app}\ProjectManager\logs"; Permissions: users-modify
-Name: "{userappdata}\..\Documents\ProjectSuite"; Permissions: users-modify
+; フォルダの作成とユーザーへの完全な権限付与
+Name: "{userappdata}\..\Documents\ProjectSuite"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\projects"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\exports"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\master"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\templates"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\logs"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\temp"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\backup"; Permissions: users-full
 
 [Icons]
 Name: "{group}\ProjectSuite"; Filename: "{app}\ProjectSuite.exe"
@@ -28,7 +35,7 @@ Name: "{commondesktop}\ProjectSuite"; Filename: "{app}\ProjectSuite.exe"
 
 [Run]
 ; インストール完了後にinitialdata処理を実行
-Filename: "{app}\ProjectSuite.exe"; Parameters: "init-data"; Description: "初期データ設定"; Flags: runhidden nowait postinstall
+Filename: "{app}\ProjectSuite.exe"; Parameters: "init-data"; Description: "初期データ設定"; Flags: runasoriginaluser nowait postinstall
 
 ; 通常のアプリ起動
-Filename: "{app}\ProjectSuite.exe"; Description: "Launch ProjectSuite"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ProjectSuite.exe"; Description: "Launch ProjectSuite"; Flags: nowait postinstall skipifsilent runasoriginaluser

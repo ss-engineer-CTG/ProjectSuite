@@ -51,12 +51,30 @@ class ConfigManager:
                     self.config_file = Path(registry_path)
                     self.logger.info(f"PathRegistryから設定ファイルパスを取得: {registry_path}")
                 else:
-                    self.config_file = self.package_root / "config" / "config.json"
+                    # ユーザーディレクトリにある設定ファイル
+                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+                    if user_config.exists():
+                        self.config_file = user_config
+                        self.logger.info(f"ユーザードキュメントから設定ファイルパスを取得: {user_config}")
+                    else:
+                        # パッケージ内の設定ファイル
+                        self.config_file = self.package_root / "config" / "config.json"
+                        self.logger.info(f"パッケージから設定ファイルパスを取得: {self.config_file}")
             else:
+                # デフォルトパス
                 self.config_file = self.package_root / "config" / "config.json"
         
-        # configフォルダがない場合は作成
-        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        # configフォルダがない場合は作成を試みる
+        try:
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # 権限エラーの場合はユーザーフォルダに変更
+            user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+            user_config.parent.mkdir(parents=True, exist_ok=True)
+            self.config_file = user_config
+            self.logger.info(f"設定ファイルをユーザードキュメントに変更: {user_config}")
+        except Exception as e:
+            self.logger.error(f"設定ディレクトリ作成エラー: {e}")
         
         # 設定ファイルがない場合はデフォルト設定で作成
         if not self.config_file.exists():
@@ -182,12 +200,23 @@ class ConfigManager:
         try:
             # バックアップの作成
             if self.config_file.exists():
-                backup_path = self.config_file.with_suffix('.bak')
-                shutil.copy2(self.config_file, backup_path)
-                self.logger.info(f"設定ファイルのバックアップを作成: {backup_path}")
+                try:
+                    backup_path = self.config_file.with_suffix('.bak')
+                    shutil.copy2(self.config_file, backup_path)
+                    self.logger.info(f"設定ファイルのバックアップを作成: {backup_path}")
+                except Exception as e:
+                    self.logger.warning(f"バックアップ作成エラー: {e}")
 
             # 設定ディレクトリの作成
-            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                # 権限エラーの場合はユーザードキュメントを使用
+                self.logger.warning(f"設定ディレクトリ作成エラー: {e}")
+                user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+                user_config.parent.mkdir(parents=True, exist_ok=True)
+                self.config_file = user_config
+                self.logger.info(f"設定ファイルをユーザードキュメントに変更: {user_config}")
             
             # パスの正規化
             if self.config.get('last_input_folder'):
@@ -196,23 +225,52 @@ class ConfigManager:
                 self.config['last_output_folder'] = str(Path(self.config['last_output_folder']).resolve())
             
             # 最終更新日時の更新
+            from datetime import datetime
             self.config['last_update'] = datetime.now().isoformat()
             
             # 設定の保存
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
-            self.logger.info(f"設定を保存: {self.config_file}")
-
+            try:
+                with open(self.config_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.config, f, ensure_ascii=False, indent=2)
+                self.logger.info(f"設定を保存: {self.config_file}")
+                
+                # レジストリにパスを登録
+                if self.registry:
+                    self.registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
+            except Exception as e:
+                self.logger.error(f"設定保存エラー: {e}")
+                # ユーザードキュメントにフォールバック
+                try:
+                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+                    user_config.parent.mkdir(parents=True, exist_ok=True)
+                    with open(user_config, 'w', encoding='utf-8') as f:
+                        json.dump(self.config, f, ensure_ascii=False, indent=2)
+                    self.logger.info(f"設定をユーザードキュメントに保存: {user_config}")
+                    self.config_file = user_config
+                    
+                    # レジストリにパスを登録
+                    if self.registry:
+                        self.registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
+                except Exception as fallback_e:
+                    self.logger.error(f"フォールバック保存エラー: {fallback_e}")
+                    raise
+            
             # バックアップの削除
-            if backup_path.exists():
-                backup_path.unlink()
+            try:
+                if 'backup_path' in locals() and backup_path.exists():
+                    backup_path.unlink()
+            except Exception as e:
+                self.logger.warning(f"バックアップ削除エラー: {e}")
                 
         except Exception as e:
             self.logger.error(f"設定保存エラー: {e}")
             # バックアップからの復元を試行
             if 'backup_path' in locals() and backup_path.exists():
-                shutil.copy2(backup_path, self.config_file)
-                self.logger.info("バックアップから設定を復元しました")
+                try:
+                    shutil.copy2(backup_path, self.config_file)
+                    self.logger.info("バックアップから設定を復元しました")
+                except Exception as restore_e:
+                    self.logger.error(f"バックアップ復元エラー: {restore_e}")
             raise
     
     def validate_config(self) -> bool:

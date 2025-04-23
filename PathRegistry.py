@@ -1,618 +1,427 @@
 """
-Self-Healing PathRegistry - 統合版パス解決モジュール
-各アプリケーション（ProjectManager, CreateProjectList, ProjectDashBoard）で共通利用
+パス管理のための統一インターフェース
+アプリケーション全体でパスを一元管理し、
+環境依存のパス問題を解決する
 """
+
 import os
 import sys
 import logging
-import json
-import shutil
-from datetime import datetime
-import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Set
-
-# ロガーの設定
-logger = logging.getLogger(__name__)
+from typing import Dict, Optional, List, Tuple, Set, Any
 
 class PathRegistry:
-    """パス解決とディレクトリ管理のための統合レジストリ"""
+    """パス管理クラス（シングルトン）"""
     
-    # シングルトンインスタンス
     _instance = None
+    _initialized = False
     
-    # パス情報を保持する辞書
-    _paths: Dict[str, str] = {}
-    
-    # パス設定ファイル名
-    CONFIG_FILE = "path_registry.json"
-    
-    # 初回起動フラグファイル名
-    INIT_FLAG_FILE = ".init_complete"
+    def __new__(cls):
+        """シングルトンパターンの実装"""
+        if cls._instance is None:
+            cls._instance = super(PathRegistry, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
     
     @classmethod
     def get_instance(cls):
-        """シングルトンインスタンスを取得"""
+        """シングルトンインスタンスの取得"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
     
     def __init__(self):
-        """初期化 - 基本パスの設定とパス情報の読み込み"""
-        if hasattr(self, '_initialized') and self._initialized:
+        """初期化（シングルトンなので1回のみ実行）"""
+        if self._initialized:
             return
             
-        # 初期化フラグ
         self._initialized = True
+        self._paths = {}
+        self._user_paths = set()  # ユーザーが明示的に設定したパス
+        self._app_base_path = self._get_app_base_path()
+        self._config = None  # 遅延ロード用
         
-        # PyInstallerかどうかの判定
-        self.is_frozen = getattr(sys, 'frozen', False)
+        # デフォルトのパス登録
+        self._register_default_paths()
         
-        # 基本ディレクトリの特定
-        if self.is_frozen:
+        # ロガーの初期化
+        self.logger = logging.getLogger(__name__)
+    
+    def _get_app_base_path(self) -> str:
+        """
+        アプリケーションの基本パスを取得
+        
+        Returns:
+            str: アプリケーションのルートディレクトリ
+        """
+        if getattr(sys, 'frozen', False):
             # PyInstallerで実行ファイル化した場合
-            self.root_dir = Path(sys._MEIPASS).parent
-            # 実行ファイルのパスも取得
-            self.exe_dir = Path(sys.executable).parent
+            return os.path.dirname(sys.executable)
         else:
-            # 通常実行時は現在のスクリプトの位置から判断
-            self.root_dir = self._find_project_root()
-            self.exe_dir = self.root_dir
-        
-        # ユーザードキュメントのProjectSuiteディレクトリを設定
-        self.user_data_dir = Path.home() / "Documents" / "ProjectSuite"
-        logger.info(f"ユーザードキュメントフォルダを設定: {self.user_data_dir}")
-        
-        # データディレクトリの設定
-        if self.user_data_dir.exists():
-            # 既に存在する場合はそれを使用
-            self.data_dir = self.user_data_dir
-            logger.info(f"既存のユーザードキュメントフォルダを使用: {self.data_dir}")
-        else:
-            # 存在しない場合は作成
-            try:
-                self.data_dir = self.user_data_dir
-                self.data_dir.mkdir(parents=True, exist_ok=True)
-                logger.info(f"ユーザードキュメントに新しいフォルダを作成: {self.data_dir}")
-            except Exception as e:
-                # エラーが発生した場合はアプリケーションディレクトリを使用
-                logger.error(f"ユーザードキュメントディレクトリ作成エラー: {e}")
-                self.data_dir = self.root_dir / "data"
-                logger.info(f"アプリケーションのデータディレクトリにフォールバック: {self.data_dir}")
-        
-        # 初期パスの設定
-        self._setup_base_paths()
-        
-        # 設定ファイルからパスを読み込む
-        self._load_paths_from_config()
-        
-        # 環境変数からパスをオーバーライド
-        self._override_from_env()
-        
-        logger.info(f"PathRegistry initialized with root: {self.root_dir}, data: {self.data_dir}")
+            # 通常の実行の場合
+            current_file = os.path.abspath(__file__)
+            return os.path.dirname(current_file)
     
-    def check_first_run(self) -> bool:
-        """
-        初回起動かどうかを確認
+    def _register_default_paths(self) -> None:
+        """デフォルトのパスを登録"""
+        # アプリケーションルートパス
+        self.register_path("ROOT", self._app_base_path)
         
-        Returns:
-            bool: 初回起動の場合はTrue
-        """
-        init_flag = self.user_data_dir / self.INIT_FLAG_FILE
-        return not init_flag.exists()
-    
-    def mark_initialization_complete(self) -> None:
-        """初期化完了をマークする"""
-        init_flag = self.user_data_dir / self.INIT_FLAG_FILE
-        try:
-            # マークファイルの作成
-            with open(init_flag, 'w') as f:
-                f.write(datetime.now().isoformat())
-            logger.info(f"初期化完了マークを作成: {init_flag}")
-        except Exception as e:
-            logger.error(f"初期化完了マーク作成エラー: {e}")
-    
-    def _find_project_root(self) -> Path:
-        """プロジェクトルートディレクトリを探索"""
-        # 現在のスクリプトの位置
-        current_path = Path(__file__).resolve().parent
+        # ユーザーデータディレクトリ
+        user_doc_dir = os.path.join(os.path.expanduser("~"), "Documents", "ProjectSuite")
+        self.register_path("USER_DATA_DIR", user_doc_dir)
         
-        # ルートを特定するためのマーカーファイル
-        root_markers = [
-            "ProjectManagerSuite.spec",
-            "build.py",
-            "launcher.py",
-            "main.py"
-        ]
+        # ログディレクトリ
+        self.register_path("LOGS_DIR", os.path.join(user_doc_dir, "logs"))
         
-        # 上位ディレクトリを探索
-        for i in range(5):  # 最大5階層まで探索
-            # マーカーファイルが存在するか確認
-            for marker in root_markers:
-                if (current_path / marker).exists():
-                    return current_path
-            
-            # ProjectManagerSuiteディレクトリかどうか確認
-            if current_path.name == "ProjectManagerSuite":
-                return current_path
-                
-            # 各アプリケーションのルートディレクトリかどうか確認
-            app_dirs = ["ProjectManager", "CreateProjectList", "ProjectDashBoard"]
-            if current_path.name in app_dirs:
-                return current_path.parent
-            
-            # 親ディレクトリに移動
-            parent = current_path.parent
-            if parent == current_path:  # ルートに到達した場合
-                break
-            current_path = parent
+        # データディレクトリ
+        self.register_path("DATA_DIR", user_doc_dir)
         
-        # 見つからない場合は現在のディレクトリを使用
-        return Path.cwd()
-    
-    def _setup_base_paths(self):
-        """基本パスの設定"""
-        # 常にユーザードキュメントフォルダを優先するように
-        user_pm_data_dir = self.user_data_dir / "ProjectManager" / "data"
+        # エクスポートディレクトリ
+        self.register_path("EXPORTS_DIR", os.path.join(user_doc_dir, "ProjectManager", "data", "exports"))
         
-        # 共通ディレクトリ構造
-        self._paths.update({
-            "ROOT": str(self.root_dir),
-            "DATA_DIR": str(self.user_data_dir),
-            "LOGS_DIR": str(self.user_data_dir / "logs"),  # ユーザードキュメントに変更
-            "EXPORTS_DIR": str(user_pm_data_dir / "exports"),
-            "TEMPLATES_DIR": str(user_pm_data_dir / "templates"),
-            "PROJECTS_DIR": str(user_pm_data_dir / "projects"),
-            "MASTER_DIR": str(user_pm_data_dir / "master"),
-            "TEMP_DIR": str(self.user_data_dir / "temp"),
-            "BACKUP_DIR": str(self.user_data_dir / "backup"),
-            "DB_PATH": str(user_pm_data_dir / "projects.db"),
-            "DASHBOARD_FILE": str(user_pm_data_dir / "exports" / "dashboard.csv"),
-            "PROJECTS_FILE": str(user_pm_data_dir / "exports" / "projects.csv"),
-        })
+        # テンプレートディレクトリ
+        self.register_path("TEMPLATES_DIR", os.path.join(user_doc_dir, "ProjectManager", "data", "templates"))
         
-        # 各アプリのパス
-        for app_name in ["ProjectManager", "CreateProjectList", "ProjectDashBoard"]:
-            self._paths[f"{app_name.upper()}_DIR"] = str(self.root_dir / app_name)
-    
-    def _load_paths_from_config(self):
-        """設定ファイルからパス情報を読み込む"""
-        # 複数の可能性のある場所を検索
-        config_locations = [
-            self.user_data_dir / self.CONFIG_FILE,  # ユーザードキュメントフォルダを優先
-            self.root_dir / self.CONFIG_FILE,
-            self.root_dir / "config" / self.CONFIG_FILE,
-            Path.home() / "ProjectManagerSuite" / self.CONFIG_FILE
-        ]
+        # デフォルトのプロジェクトディレクトリ
+        default_projects_dir = os.path.join(user_doc_dir, "ProjectManager", "data", "projects")
+        self.register_path("PROJECTS_DIR", default_projects_dir)
         
-        for config_path in config_locations:
-            if config_path.exists():
-                try:
-                    with open(config_path, 'r', encoding='utf-8') as f:
-                        custom_paths = json.load(f)
-                        self._paths.update(custom_paths)
-                        logger.info(f"Loaded paths from {config_path}")
-                        break
-                except Exception as e:
-                    logger.error(f"Error loading path config from {config_path}: {e}")
-    
-    def _override_from_env(self):
-        """環境変数からパスをオーバーライド"""
-        # PMSUITE_PATH_* という形式の環境変数を探す
-        prefix = "PMSUITE_PATH_"
-        for key, value in os.environ.items():
-            if key.startswith(prefix):
-                path_key = key[len(prefix):].upper()
-                self._paths[path_key] = value
-                logger.info(f"Path overridden from environment: {path_key}={value}")
+        # マスターデータディレクトリ
+        self.register_path("MASTER_DIR", os.path.join(user_doc_dir, "ProjectManager", "data", "master"))
         
-        # 特別な環境変数も確認
-        special_vars = {
-            "PMSUITE_DASHBOARD_FILE": "DASHBOARD_FILE",
-            "PMSUITE_DASHBOARD_DATA_DIR": "EXPORTS_DIR",
-            "PMSUITE_DB_PATH": "DB_PATH",
-            "PMSUITE_DATA_DIR": "DATA_DIR",
-            "PMSUITE_USER_DIR": "USER_DATA_DIR"
-        }
+        # 一時ファイルディレクトリ
+        self.register_path("TEMP_DIR", os.path.join(user_doc_dir, "temp"))
         
-        for env_var, path_key in special_vars.items():
-            if env_var in os.environ:
-                self._paths[path_key] = os.environ[env_var]
-                logger.info(f"Path overridden from special environment variable: {path_key}={os.environ[env_var]}")
+        # バックアップディレクトリ
+        self.register_path("BACKUP_DIR", os.path.join(user_doc_dir, "backup"))
         
-        # 環境変数に重要なパスを設定（他のコンポーネントから参照可能に）
-        os.environ["PMSUITE_DATA_DIR"] = str(self.user_data_dir)
-        os.environ["PMSUITE_DB_PATH"] = str(self.user_data_dir / "ProjectManager" / "data" / "projects.db")
-        os.environ["PMSUITE_DASHBOARD_FILE"] = str(self.user_data_dir / "ProjectManager" / "data" / "exports" / "dashboard.csv")
-    
-    def get_path(self, key: str, default: Optional[str] = None) -> Optional[str]:
-        """
-        パスを取得し、問題があれば自動修復を試みる
+        # CreateProjectList用ディレクトリ
+        self.register_path("CPL_DIR", os.path.join(user_doc_dir, "CreateProjectList"))
+        self.register_path("CPL_CONFIG_DIR", os.path.join(user_doc_dir, "CreateProjectList", "config"))
+        self.register_path("CPL_TEMP_DIR", os.path.join(user_doc_dir, "CreateProjectList", "temp"))
+        self.register_path("CPL_TEMPLATES_DIR", os.path.join(user_doc_dir, "CreateProjectList", "templates"))
+        self.register_path("CPL_CACHE_DIR", os.path.join(user_doc_dir, "CreateProjectList", "cache"))
         
-        Args:
-            key: パスのキー
-            default: パスが見つからない場合のデフォルト値
-            
-        Returns:
-            str: 解決されたパス
-        """
-        path = self._paths.get(key, default)
-        if path is None:
-            logger.warning(f"Path not found: {key}")
-            return default
-            
-        # パスの存在確認と自動修復
-        path_obj = Path(path)
-        if not path_obj.exists():
-            # ディレクトリの場合は自動作成を試みる
-            if key.endswith('_DIR'):
-                try:
-                    path_obj.mkdir(parents=True, exist_ok=True)
-                    logger.info(f"自動修復: ディレクトリ {key} を作成しました: {path}")
-                    return path
-                except Exception as e:
-                    logger.error(f"自動修復失敗: {key} ({path}): {e}")
-            
-            # ファイルの場合は親ディレクトリの作成を試みる
-            elif key.endswith(('_FILE', '_PATH')):
-                try:
-                    path_obj.parent.mkdir(parents=True, exist_ok=True)
-                    logger.info(f"自動修復: {key} の親ディレクトリを作成しました: {path_obj.parent}")
-                    # ファイル自体は作成しない（空ファイルの作成は避ける）
-                except Exception as e:
-                    logger.error(f"自動修復失敗: {key} の親ディレクトリ ({path_obj.parent}): {e}")
-            
-            # 代替パスの探索を試みる
-            alternative = self._find_alternative(key, path)
-            if alternative:
-                logger.info(f"代替パスを使用: {key}: {alternative}")
-                self._paths[key] = str(alternative)  # 見つかった代替パスで更新
-                return str(alternative)
-        
-        return path
-    
-    def _find_alternative(self, key: str, original_path: str) -> Optional[Path]:
-        """
-        欠落しているパスの代替を探索
-        
-        Args:
-            key: パスのキー
-            original_path: 元のパス
-            
-        Returns:
-            Path or None: 代替パス（見つからない場合はNone）
-        """
-        path_obj = Path(original_path)
-        
-        try:
-            # 1. 既知のパターンでの置換を試みる
-            patterns = {
-                # ProjectManagerSuite -> ProjectManager
-                r'ProjectManagerSuite': ['ProjectManager', 'ProjectSuite'],
-                # data/exports -> exports
-                r'data[/\\]exports': ['exports', 'data'],
-                # documents/projects -> projects
-                r'documents[/\\]projects': ['projects', 'documents']
-            }
-            
-            for pattern, replacements in patterns.items():
-                for replacement in replacements:
-                    try:
-                        alt_path_str = str(path_obj).replace(pattern, replacement)
-                        alt_path = Path(alt_path_str)
-                        if alt_path.exists():
-                            return alt_path
-                    except:
-                        continue
-            
-            # 2. 親ディレクトリでの探索
-            if path_obj.name:
-                try:
-                    # 親ディレクトリ内の同名ファイル/フォルダを検索
-                    parent = path_obj.parent
-                    if parent.exists():
-                        for item in parent.iterdir():
-                            # 名前の部分一致で検索（大文字小文字を区別しない）
-                            if path_obj.name.lower() in item.name.lower():
-                                return item
-                except:
-                    pass
-            
-            # 3. 共通のフォールバックディレクトリをチェック
-            fallback_locations = [
-                self.user_data_dir,  # まずユーザーデータディレクトリを優先
-                self.user_data_dir / "ProjectManager" / "data",
-                self.root_dir,
-                self.exe_dir / "sampledata",
-                Path.home() / "Documents" / "ProjectSuite",
-                Path.home() / "ProjectManagerSuite",
-                Path.home() / "Documents" / "ProjectManagerSuite",
-                Path.home() / "Documents" / "Projects" / "ProjectSuite" / "ProjectManager" / "data"
-            ]
-            
-            filename = path_obj.name
-            for location in fallback_locations:
-                try:
-                    if location.exists():
-                        # 直接のファイル
-                        direct = location / filename
-                        if direct.exists():
-                            return direct
-                        
-                        # サブディレクトリの検索
-                        for item in location.glob(f"**/{filename}"):
-                            return item
-                except:
-                    continue
-        except Exception as e:
-            logger.error(f"代替パス探索エラー: {e}")
-            
-        return None
+        # デフォルトのデータベースパス
+        self.register_path("DB_PATH", os.path.join(user_doc_dir, "ProjectManager", "data", "projects.db"))
     
     def register_path(self, key: str, path: str) -> None:
         """
-        新しいパスを登録
+        パスを登録
         
         Args:
             key: パスのキー
-            path: パス
+            path: パスの値
         """
-        self._paths[key.upper()] = str(path)
-        logger.info(f"Registered path: {key}={path}")
+        self._paths[key] = path
+        self._user_paths.add(key)  # ユーザー登録パスとして記録
     
-    def ensure_directory(self, key: str) -> Optional[str]:
+    def get_path(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """
-        指定されたパスのディレクトリを確保
+        登録されたパスを取得（拡張版）
+        
+        優先順位:
+        1. 明示的に登録されたパス
+        2. 設定ファイルからのカスタムパス
+        3. デフォルト値
         
         Args:
-            key: パスのキー
+            key: パスキー
+            default: デフォルト値
             
         Returns:
-            str: 確保したディレクトリのパス
+            Optional[str]: 解決されたパス
+        """
+        # 1. 登録済みパスをチェック
+        if key in self._paths:
+            return self._paths[key]
+        
+        # 2. PROJECTSキーの特別処理
+        if key == "PROJECTS_DIR" or key == "OUTPUT_BASE_DIR":
+            # 設定ファイルからカスタムパスを取得
+            custom_path = self.get_custom_projects_path()
+            if custom_path:
+                # パスを登録して今後の参照を簡素化
+                self.register_path(key, custom_path)
+                return custom_path
+        
+        # 3. デフォルト値を返す
+        return default
+    
+    def get_custom_projects_path(self) -> Optional[str]:
+        """
+        カスタムプロジェクトパスを設定ファイルから取得
+        
+        Returns:
+            Optional[str]: カスタムプロジェクトパス。設定されていない場合はNone
+        """
+        # 設定の読み込み
+        if not self._config:
+            self._config = self._load_config()
+        
+        # カスタムパスの取得
+        custom_path = self._config.get('custom_projects_dir')
+        
+        if custom_path and os.path.exists(custom_path):
+            return custom_path
+        
+        return None
+    
+    def _load_config(self) -> Dict[str, str]:
+        """
+        設定ファイルから設定を読み込む
+        
+        Returns:
+            Dict[str, str]: 設定データ
+        """
+        config = {}
+        
+        # 設定ファイルのパス
+        default_paths = [
+            os.path.join(os.path.expanduser("~"), "Documents", "ProjectSuite", "defaults.txt"),
+            os.path.join(self._app_base_path, "defaults.txt")
+        ]
+        
+        # 最初に見つかった設定ファイルを読み込む
+        for path in default_paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                try:
+                                    key, value = [x.strip() for x in line.split('=', 1)]
+                                    config[key] = value
+                                except ValueError:
+                                    continue
+                    break
+                except Exception as e:
+                    self.logger.warning(f"設定ファイル読み込みエラー: {e}")
+        
+        return config
+    
+    def get_config(self) -> Dict[str, str]:
+        """
+        設定を取得
+        
+        Returns:
+            Dict[str, str]: 設定データ
+        """
+        if not self._config:
+            self._config = self._load_config()
+        
+        return self._config
+    
+    def ensure_directory(self, key: str) -> bool:
+        """
+        指定キーのディレクトリが存在することを確認し、なければ作成
+        
+        Args:
+            key: ディレクトリのキー
+            
+        Returns:
+            bool: 作成成功時はTrue
         """
         path = self.get_path(key)
-        if path:
-            directory = Path(path)
-            if not directory.exists():
-                directory.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Created directory: {directory}")
-            return str(directory)
-        return None
+        if not path:
+            self.logger.warning(f"ディレクトリキーが未登録: {key}")
+            return False
+            
+        path_obj = Path(path)
+        if path_obj.exists() and path_obj.is_dir():
+            return True
+            
+        try:
+            path_obj.mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"ディレクトリを作成: {path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"ディレクトリ作成エラー {path}: {e}")
+            return False
+    
+    def get_all_paths(self) -> Dict[str, str]:
+        """
+        登録されている全パスを取得
+        
+        Returns:
+            Dict[str, str]: パス一覧
+        """
+        return self._paths.copy()
     
     def diagnose(self) -> Dict[str, Any]:
         """
-        パス設定の健全性診断を実行し、問題点と解決策を提案
+        パス診断を実行
         
         Returns:
-            dict: 診断レポート
+            Dict[str, Any]: 診断結果
         """
         issues = []
-        stats = {
-            "total": len(self._paths),
-            "missing": 0,
-            "permission_issues": 0,
-            "type_mismatch": 0
-        }
         
-        for key, path in self._paths.items():
-            path_obj = Path(path)
-            
-            # 存在チェック
-            if not path_obj.exists():
-                stats["missing"] += 1
-                
-                # 問題の種類を特定
-                if key.endswith('_DIR'):
-                    issue_type = "missing_directory"
-                    solution = f"mkdir -p \"{path}\""
-                elif key.endswith(('_FILE', '_PATH')):
-                    issue_type = "missing_file"
-                    solution = f"親ディレクトリの確認: mkdir -p \"{path_obj.parent}\""
-                else:
-                    issue_type = "missing_path"
-                    solution = "パスが存在しません。正しいパスを設定してください。"
-                
+        # 基本ディレクトリの存在チェック
+        essential_dirs = ["USER_DATA_DIR", "LOGS_DIR", "DATA_DIR", "PROJECTS_DIR"]
+        for key in essential_dirs:
+            path = self.get_path(key)
+            if not path:
                 issues.append({
+                    "type": "missing_key",
                     "key": key,
-                    "path": path,
-                    "type": issue_type,
-                    "solution": solution,
-                    "severity": "high" if key in ["DB_PATH", "DATA_DIR"] else "medium"
+                    "severity": "error"
                 })
                 continue
-            
-            # タイプミスマッチ
-            if key.endswith('_DIR') and not path_obj.is_dir():
-                stats["type_mismatch"] += 1
+                
+            path_obj = Path(path)
+            if not path_obj.exists():
                 issues.append({
+                    "type": "missing_dir",
                     "key": key,
                     "path": path,
-                    "type": "not_a_directory",
-                    "solution": "ディレクトリとして指定されたパスがファイルです。正しいディレクトリを指定してください。",
-                    "severity": "high"
+                    "severity": "warning",
+                    "fixable": True
                 })
-            
-            # 権限チェック
+            elif not path_obj.is_dir():
+                issues.append({
+                    "type": "not_dir",
+                    "key": key,
+                    "path": path,
+                    "severity": "error"
+                })
+        
+        # DBファイルの確認
+        db_path = self.get_path("DB_PATH")
+        if db_path:
+            db_obj = Path(db_path)
+            if not db_obj.parent.exists():
+                issues.append({
+                    "type": "db_parent_missing",
+                    "path": str(db_obj.parent),
+                    "severity": "warning",
+                    "fixable": True
+                })
+        
+        # プロジェクトパスの検証
+        projects_dir = self.get_path("PROJECTS_DIR")
+        if projects_dir:
             try:
-                if key.endswith(('_DIR', '_FILE', '_PATH')):
-                    test_access = False
-                    if path_obj.is_dir():
-                        # ディレクトリの書き込み権限チェック
-                        test_file = path_obj / f".pathregistry_test_{datetime.now().timestamp()}"
+                projects_obj = Path(projects_dir)
+                if not projects_obj.exists():
+                    issues.append({
+                        "type": "projects_dir_missing",
+                        "path": projects_dir,
+                        "severity": "warning",
+                        "fixable": True
+                    })
+                else:
+                    # 書き込み権限の確認
+                    test_file = projects_obj / ".write_test"
+                    try:
                         test_file.touch()
                         test_file.unlink()
-                        test_access = True
-                    elif path_obj.is_file():
-                        # ファイルの読み取り権限チェック
-                        with open(path_obj, 'r') as f:
-                            f.read(1)
-                        test_access = True
-                        
-                    if not test_access:
-                        stats["permission_issues"] += 1
+                    except (PermissionError, OSError):
                         issues.append({
-                            "key": key,
-                            "path": path,
-                            "type": "permission_denied",
-                            "solution": f"アクセス権限を確認: chmod +rw \"{path}\"",
-                            "severity": "high"
+                            "type": "permission_error",
+                            "path": projects_dir,
+                            "severity": "error"
                         })
             except Exception as e:
-                stats["permission_issues"] += 1
                 issues.append({
-                    "key": key,
-                    "path": path,
-                    "type": "access_error",
-                    "solution": f"アクセスエラー: {str(e)}",
-                    "severity": "high"
+                    "type": "validation_error",
+                    "path": projects_dir,
+                    "error": str(e),
+                    "severity": "error"
                 })
         
-        # レポート作成
-        report = {
-            "timestamp": datetime.now().isoformat(),
-            "status": "healthy" if not issues else "issues_found",
-            "stats": stats,
-            "issues": issues
+        # 診断結果の返却
+        return {
+            "issues": issues,
+            "total_issues": len(issues),
+            "error_count": sum(1 for i in issues if i["severity"] == "error"),
+            "warning_count": sum(1 for i in issues if i["severity"] == "warning")
         }
-        
-        return report
     
-    def auto_repair(self, issues=None) -> Dict[str, List]:
+    def auto_repair(self, issues: List[Dict[str, Any]]) -> Dict[str, List[str]]:
         """
-        診断で見つかった問題を自動修復
+        診断結果に基づく自動修復
         
         Args:
-            issues: 問題リスト（Noneの場合は診断を実行）
+            issues: 診断結果の問題リスト
             
         Returns:
-            dict: 修復レポート
+            Dict[str, List[str]]: 修復結果
         """
-        if issues is None:
-            # 診断を実行
-            diagnosis = self.diagnose()
-            issues = diagnosis["issues"]
-            
         repaired = []
         failed = []
         
         for issue in issues:
-            try:
-                key = issue["key"]
-                path = issue["path"]
-                path_obj = Path(path)
+            if issue.get("fixable", False):
+                if issue["type"] == "missing_dir":
+                    try:
+                        path = Path(issue["path"])
+                        path.mkdir(parents=True, exist_ok=True)
+                        repaired.append(f"ディレクトリを作成: {path}")
+                    except Exception as e:
+                        failed.append(f"ディレクトリ作成失敗 {issue['path']}: {e}")
                 
-                if issue["type"] == "missing_directory":
-                    # ディレクトリ作成
-                    path_obj.mkdir(parents=True, exist_ok=True)
-                    repaired.append({"key": key, "action": "created_directory"})
-                    
-                elif issue["type"] == "missing_file":
-                    # 親ディレクトリを作成
-                    path_obj.parent.mkdir(parents=True, exist_ok=True)
-                    repaired.append({"key": key, "action": "created_parent_directory"})
-                    
-                elif issue["type"] in ["permission_denied", "access_error"]:
-                    # 権限問題は自動修復が難しいのでスキップ
-                    failed.append({"key": key, "reason": "permission_issues_require_manual_fix"})
-                    
-                else:
-                    # その他の問題
-                    failed.append({"key": key, "reason": "unsupported_issue_type"})
+                elif issue["type"] == "db_parent_missing":
+                    try:
+                        path = Path(issue["path"])
+                        path.mkdir(parents=True, exist_ok=True)
+                        repaired.append(f"DBパス親ディレクトリを作成: {path}")
+                    except Exception as e:
+                        failed.append(f"DBパス親ディレクトリ作成失敗 {issue['path']}: {e}")
                 
-            except Exception as e:
-                failed.append({"key": issue["key"], "reason": str(e)})
+                elif issue["type"] == "projects_dir_missing":
+                    try:
+                        path = Path(issue["path"])
+                        path.mkdir(parents=True, exist_ok=True)
+                        repaired.append(f"プロジェクトディレクトリを作成: {path}")
+                    except Exception as e:
+                        failed.append(f"プロジェクトディレクトリ作成失敗 {issue['path']}: {e}")
         
         return {
             "repaired": repaired,
             "failed": failed
         }
     
-    def export_config(self, path=None) -> bool:
+    def check_first_run(self) -> bool:
         """
-        現在のパス設定をファイルにエクスポート
+        初回起動チェック
         
-        Args:
-            path: 出力先パス（Noneの場合はデフォルト）
-            
         Returns:
-            bool: 成功したらTrue
+            bool: 初回起動の場合True
         """
-        if path is None:
-            # ユーザードキュメントディレクトリに保存
-            path = self.user_data_dir / self.CONFIG_FILE
-        
-        try:
-            # 親ディレクトリが存在しない場合は作成
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self._paths, f, indent=2, ensure_ascii=False)
-                logger.info(f"Exported path configuration to {path}")
+        # 初期化完了マークファイルの確認
+        user_data_dir = self.get_path("USER_DATA_DIR")
+        if not user_data_dir:
             return True
-        except Exception as e:
-            logger.error(f"Failed to export path configuration: {e}")
-            return False
-    
-    def get_all_paths(self) -> Dict[str, str]:
-        """
-        全パス情報を取得
-        
-        Returns:
-            dict: 全パス情報
-        """
-        return dict(self._paths)
-    
-    def find_data_source(self) -> Optional[Path]:
-        """
-        データソースを検索
-        
-        Returns:
-            Optional[Path]: 検出されたデータソースパス
-        """
-        # 検索場所のリスト（優先順位順）
-        potential_paths = [
-            # 最優先: ユーザーのドキュメントフォルダ
-            Path.home() / "Documents" / "ProjectSuite" / "ProjectManager" / "data",
             
-            # 次に: サンプルデータフォルダ
-            self.root_dir / "sampledata",
-            self.exe_dir / "sampledata",
-            
-            # 次に: アプリケーションのデータディレクトリ
-            self.root_dir / "data",
-            
-            # 次に: ProjectManagerのデータディレクトリ
-            self.root_dir / "ProjectManager" / "data",
-            Path(os.getcwd()) / "ProjectManager" / "data",
-            
-            # 最後に: その他の一般的な場所
-            Path.home() / "Projects" / "ProjectSuite" / "ProjectManager" / "data"
-        ]
-        
-        # パスが存在するか確認
-        for path in potential_paths:
-            if path.exists() and path.is_dir():
-                # 実際にデータらしきものが存在するか確認
-                has_content = any([
-                    (path / "projects").exists(),
-                    (path / "templates").exists(),
-                    (path / "master").exists(),
-                    (path / "projects.db").exists()
-                ])
-                
-                if has_content:
-                    logger.info(f"データソースディレクトリを発見: {path}")
-                    return path
-        
-        # 見つからない場合
-        logger.warning("データソースディレクトリが見つかりませんでした")
-        return None
+        init_file = os.path.join(user_data_dir, ".init_complete")
+        return not os.path.exists(init_file)
 
-# 簡易アクセス関数
 def get_path(key: str, default: Optional[str] = None) -> Optional[str]:
-    """パスを取得する簡易関数"""
-    return PathRegistry.get_instance().get_path(key, default)
+    """
+    グローバルユーティリティ: パスを取得
+    
+    Args:
+        key: パスのキー
+        default: デフォルト値
+    
+    Returns:
+        Optional[str]: パス
+    """
+    registry = PathRegistry.get_instance()
+    return registry.get_path(key, default)
 
-def ensure_dir(key: str) -> Optional[str]:
-    """ディレクトリを確保する簡易関数"""
-    return PathRegistry.get_instance().ensure_directory(key)
+def ensure_dir(key: str) -> bool:
+    """
+    グローバルユーティリティ: ディレクトリを確保
+    
+    Args:
+        key: ディレクトリのキー
+    
+    Returns:
+        bool: 成功したらTrue
+    """
+    registry = PathRegistry.get_instance()
+    return registry.ensure_directory(key)
