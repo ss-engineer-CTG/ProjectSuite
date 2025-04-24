@@ -3,8 +3,11 @@
 """
 import sys
 import os
+import json  # 追加: jsonモジュールのインポート
 from pathlib import Path
 import logging
+import shutil
+import traceback
 
 # パスレジストリをインポート
 try:
@@ -21,14 +24,12 @@ try:
             # アプリ内部のモジュールの場合
             sys.path.insert(0, str(parent_dir.parent))
     
-    from PathRegistry import PathRegistry, get_path, ensure_dir
+    from PathRegistry import PathRegistry
 except ImportError as e:
     # フォールバックとして相対的な検索
     import importlib.util
-    import traceback
     
     logging.error(f"PathRegistry インポートエラー: {e}")
-    logging.error(traceback.format_exc())
     
     # パスレジストリを検索して動的にインポート
     registry_paths = [
@@ -44,8 +45,6 @@ except ImportError as e:
                 PathRegistry_module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(PathRegistry_module)
                 PathRegistry = PathRegistry_module.PathRegistry
-                get_path = PathRegistry_module.get_path
-                ensure_dir = PathRegistry_module.ensure_dir
                 break
             except Exception as err:
                 logging.error(f"PathRegistry動的読込エラー {path}: {err}")
@@ -59,14 +58,33 @@ except ImportError as e:
             def get_path(self, key, default=None):
                 return default
                 
+            def get_all_paths(self):
+                return {}
+                
             def ensure_directory(self, key):
                 return None
-        
-        def get_path(key, default=None):
-            return default
-            
-        def ensure_dir(key):
-            return None
+                
+            def register_path(self, key, path):
+                pass
+
+try:
+    from CreateProjectList.utils.path_constants import PathKeys
+except ImportError:
+    # パス定数のダミー定義
+    class PathKeys:
+        USER_DATA_DIR = "USER_DATA_DIR"
+        CPL_DIR = "CPL_DIR"
+        CPL_CONFIG_DIR = "CPL_CONFIG_DIR"
+        CPL_CONFIG_PATH = "CPL_CONFIG_PATH"
+        CPL_TEMP_DIR = "CPL_TEMP_DIR"
+        CPL_TEMPLATES_DIR = "CPL_TEMPLATES_DIR"
+        CPL_CACHE_DIR = "CPL_CACHE_DIR"
+        CPL_INPUT_FOLDER = "CPL_INPUT_FOLDER"
+        CPL_OUTPUT_FOLDER = "CPL_OUTPUT_FOLDER"
+        PM_DB_PATH = "DB_PATH"
+        PM_TEMPLATES_DIR = "TEMPLATES_DIR"
+        PM_PROJECTS_DIR = "PROJECTS_DIR"
+        LOGS_DIR = "LOGS_DIR"
 
 # ロガー
 logger = logging.getLogger(__name__)
@@ -81,267 +99,172 @@ def adapt_create_project_list_config():
     try:
         registry = PathRegistry.get_instance()
         
+        # アプリケーションのルートディレクトリ
+        app_root = registry.get_path("ROOT")
+        if not app_root:
+            app_root = str(Path(__file__).parent.parent)
+            registry.register_path("ROOT", app_root)
+            
+        # ユーザードキュメントディレクトリ
+        user_docs = registry.get_path(PathKeys.USER_DATA_DIR)
+        if not user_docs:
+            user_docs = str(Path.home() / "Documents" / "ProjectSuite")
+            registry.register_path(PathKeys.USER_DATA_DIR, user_docs)
+        
+        # CreateProjectList関連のパスを登録
+        cpl_paths = {
+            PathKeys.CPL_DIR: os.path.join(user_docs, "CreateProjectList"),
+            PathKeys.CPL_CONFIG_DIR: os.path.join(user_docs, "CreateProjectList", "config"),
+            PathKeys.CPL_TEMP_DIR: os.path.join(user_docs, "CreateProjectList", "temp"),
+            PathKeys.CPL_TEMPLATES_DIR: os.path.join(user_docs, "CreateProjectList", "templates"),
+            PathKeys.CPL_CACHE_DIR: os.path.join(user_docs, "CreateProjectList", "cache"),
+        }
+        
+        # パスの登録
+        for key, path in cpl_paths.items():
+            registry.register_path(key, path)
+            os.makedirs(path, exist_ok=True)
+        
+        # 必要なパスをProjectManagerから取得
+        db_path = registry.get_path(PathKeys.PM_DB_PATH)
+        templates_dir = registry.get_path(PathKeys.PM_TEMPLATES_DIR) 
+        projects_dir = registry.get_path(PathKeys.PM_PROJECTS_DIR)
+        
+        # ConfigManagerモンキーパッチを適用
+        _apply_config_manager_patch()
+        
+        return registry
+        
+    except Exception as e:
+        logger.error(f"CreateProjectList設定アダプターエラー: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+def _apply_config_manager_patch():
+    """ConfigManager クラスにモンキーパッチを適用"""
+    try:
         from CreateProjectList.utils.config_manager import ConfigManager
+        from CreateProjectList.utils.log_manager import LogManager
         
         # オリジナルの初期化関数を保存
         original_init = ConfigManager.__init__
         
         def patched_init(self, config_file=None):
             """パス解決をレジストリ経由に切り替えつつ、元の処理も実行"""
-            # 設定ファイルの処理を変更
-            if config_file:
-                self.config_file = Path(config_file)
-            else:
-                # PathRegistryから設定ファイルパスを優先的に取得
-                registry_path = registry.get_path("CPL_CONFIG_PATH")
-                if registry_path:
-                    self.config_file = Path(registry_path)
-                    self.logger.info(f"PathRegistryから設定ファイルパスを取得: {registry_path}")
-                else:
-                    # フォールバック: ユーザーのドキュメントフォルダにある設定ファイル
-                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
-                    if user_config.exists():
-                        self.config_file = user_config
-                        self.logger.info(f"ユーザードキュメントから設定ファイルパスを取得: {user_config}")
-                    else:
-                        # 最終フォールバック: パッケージ内の設定ファイル
-                        self.config_file = self.package_root / "config" / "config.json"
-                        self.logger.info(f"パッケージから設定ファイルパスを取得: {self.config_file}")
+            # オリジナルの初期化を呼び出し
+            original_init(self, config_file)
             
-            # 設定ファイルのパスを準備
-            if not self.config_file.parent.exists():
-                try:
-                    self.config_file.parent.mkdir(parents=True, exist_ok=True)
-                except Exception as e:
-                    # 書き込み権限がない場合、ユーザードキュメントフォルダに変更
-                    self.logger.warning(f"設定ディレクトリの作成に失敗: {e}")
-                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
-                    user_config.parent.mkdir(parents=True, exist_ok=True)
-                    self.config_file = user_config
-                    self.logger.info(f"設定ファイルをユーザードキュメントに変更: {user_config}")
-            
-            # オリジナルの処理を呼び出し
             try:
-                self.logger = LogManager().get_logger(__name__)
-                
-                # PathRegistryを初期化
-                try:
-                    from PathRegistry import PathRegistry
-                    self.registry = PathRegistry.get_instance()
-                except ImportError:
-                    self.registry = None
-                    self.logger.warning("PathRegistryを読み込めませんでした")
-                
-                # パッケージのルートディレクトリを取得
-                self.package_root = Path(__file__).parent.parent
-                
-                # デフォルトの設定ファイルパス
-                self.default_config_path = self.package_root / "config" / "config.json"
-                
-                # 親アプリケーションの設定
-                self.parent_config = None
-                
-                # 設定ファイルがない場合はデフォルト設定で作成
-                if not self.config_file.exists():
-                    self.config = self._load_default_config()
-                    self.save_config()
-                    self.logger.info(f"新しい設定ファイルを作成: {self.config_file}")
-                else:
-                    self.config = self._load_default_config()
+                # PathRegistryからの取得を試みる
+                if hasattr(self, 'registry') and self.registry:
+                    # DB_PATHをレジストリから取得
+                    db_path = self.registry.get_path(PathKeys.PM_DB_PATH)
+                    if db_path and not self.config.get('db_path'):
+                        self.config['db_path'] = db_path
+                        self.logger.info(f"PathRegistryからDBパスを取得: {db_path}")
                     
-                self.load_config()
-                self.logger.info("ConfigManager initialized")
-            except Exception as init_error:
-                self.logger.error(f"初期化エラー: {init_error}")
-                logging.error(f"初期化エラー: {init_error}")
-                # 基本的なオブジェクト初期化
-                self.config = {}
-                self.config_file = Path()
-            
-            # レジストリからDBパスを取得
-            db_path = registry.get_path("DB_PATH", self.config.get('db_path', ''))
-            if db_path:
-                self.config['db_path'] = db_path
-            
-            # 入力/出力フォルダをレジストリから取得
-            input_folder = registry.get_path("TEMPLATES_DIR", self.config.get('last_input_folder', ''))
-            output_folder = registry.get_path("PROJECTS_DIR", self.config.get('last_output_folder', ''))
-            
-            if input_folder:
-                self.config['last_input_folder'] = input_folder
-            if output_folder:
-                self.config['last_output_folder'] = output_folder
-            
-            # レジストリにパスを登録
-            if hasattr(self, 'config_file') and self.config_file:
-                registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
-            
-            # 一時ディレクトリの設定
-            temp_dir = registry.get_path("CPL_TEMP_DIR", self.config.get('temp_dir', ''))
-            if temp_dir:
-                self.config['temp_dir'] = temp_dir
-            else:
-                # 一時ディレクトリがない場合は作成
-                default_temp = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "temp"
-                default_temp.mkdir(parents=True, exist_ok=True)
-                self.config['temp_dir'] = str(default_temp)
-            
-            # レジストリに登録
-            registry.register_path("CPL_TEMP_DIR", self.config.get('temp_dir', ''))
-            registry.register_path("CPL_INPUT_FOLDER", self.config.get('last_input_folder', ''))
-            registry.register_path("CPL_OUTPUT_FOLDER", self.config.get('last_output_folder', ''))
+                    # テンプレートディレクトリをレジストリから取得
+                    template_dir = self.registry.get_path(PathKeys.PM_TEMPLATES_DIR
+                    if template_dir and not self.config.get('last_input_folder'):
+                        self.config['last_input_folder'] = template_dir
+                        self.logger.info(f"PathRegistryからテンプレートディレクトリを取得: {template_dir}")
+                    
+                    # プロジェクトディレクトリをレジストリから取得
+                    projects_dir = self.registry.get_path(PathKeys.PM_PROJECTS_DIR)
+                    if projects_dir and not self.config.get('last_output_folder'):
+                        self.config['last_output_folder'] = projects_dir
+                        self.logger.info(f"PathRegistryからプロジェクトディレクトリを取得: {projects_dir}")
+                    
+                    # 一時ディレクトリをレジストリから取得
+                    temp_dir = self.registry.get_path(PathKeys.CPL_TEMP_DIR)
+                    if temp_dir:
+                        self.config['temp_dir'] = temp_dir
+                        self.logger.info(f"PathRegistryから一時ディレクトリを取得: {temp_dir}")
+                    
+                    # 変更があれば保存
+                    self.save_config()
+            except Exception as e:
+                self.logger.warning(f"設定の更新でエラー: {e}")
         
         # 初期化関数を置き換え
         ConfigManager.__init__ = patched_init
         
-        # オリジナルの保存関数を保存
-        original_save = ConfigManager.save_config
+        logger.info("ConfigManager パッチを適用しました")
         
-        def patched_save_config(self) -> None:
-            """設定ファイルの保存処理を修正"""
-            try:
-                # バックアップの作成
-                if self.config_file.exists():
-                    try:
-                        backup_path = self.config_file.with_suffix('.bak')
-                        shutil.copy2(self.config_file, backup_path)
-                        self.logger.info(f"設定ファイルのバックアップを作成: {backup_path}")
-                    except Exception as backup_error:
-                        self.logger.warning(f"バックアップ作成エラー: {backup_error}")
-
-                # 設定ディレクトリの作成
-                try:
-                    self.config_file.parent.mkdir(parents=True, exist_ok=True)
-                except Exception as dir_error:
-                    # 権限エラーの場合はユーザードキュメントを使用
-                    self.logger.warning(f"設定ディレクトリ作成エラー: {dir_error}")
-                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
-                    user_config.parent.mkdir(parents=True, exist_ok=True)
-                    self.config_file = user_config
-                    self.logger.info(f"設定ファイルをユーザードキュメントに変更: {user_config}")
-                
-                # パスの正規化
-                if self.config.get('last_input_folder'):
-                    self.config['last_input_folder'] = str(Path(self.config['last_input_folder']).resolve())
-                if self.config.get('last_output_folder'):
-                    self.config['last_output_folder'] = str(Path(self.config['last_output_folder']).resolve())
-                
-                # 最終更新日時の更新
-                from datetime import datetime
-                self.config['last_update'] = datetime.now().isoformat()
-                
-                # 設定の保存
-                try:
-                    with open(self.config_file, 'w', encoding='utf-8') as f:
-                        import json
-                        json.dump(self.config, f, ensure_ascii=False, indent=2)
-                    self.logger.info(f"設定を保存: {self.config_file}")
-                    
-                    # レジストリにパスを登録
-                    registry = PathRegistry.get_instance()
-                    registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
-                except Exception as save_error:
-                    self.logger.error(f"設定ファイル保存エラー: {save_error}")
-                    # ユーザードキュメントにフォールバック
-                    try:
-                        user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
-                        user_config.parent.mkdir(parents=True, exist_ok=True)
-                        with open(user_config, 'w', encoding='utf-8') as f:
-                            import json
-                            json.dump(self.config, f, ensure_ascii=False, indent=2)
-                        self.logger.info(f"設定をユーザードキュメントに保存: {user_config}")
-                        self.config_file = user_config
-                        
-                        # レジストリにパスを登録
-                        registry = PathRegistry.get_instance()
-                        registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
-                    except Exception as fallback_error:
-                        self.logger.error(f"フォールバック保存エラー: {fallback_error}")
-                        raise
-                
-                # バックアップの削除
-                try:
-                    if 'backup_path' in locals() and backup_path.exists():
-                        backup_path.unlink()
-                except Exception as backup_delete_error:
-                    self.logger.warning(f"バックアップ削除エラー: {backup_delete_error}")
-                    
-            except Exception as e:
-                self.logger.error(f"設定保存エラー: {e}")
-                raise
-        
-        # 保存関数を置き換え
-        ConfigManager.save_config = patched_save_config
-        
-        # path_managerのアダプター追加
-        from CreateProjectList.utils.path_manager import PathManager
-        
-        # オリジナルのメソッドをバックアップ
-        original_normalize_path = PathManager.normalize_path
-        
-        def patched_normalize_path(path: str) -> str:
-            """
-            レジストリを使用したパス正規化
-            """
-            # まずレジストリでパスキーを探す
-            registry_key = None
-            for key, value in registry.get_all_paths().items():
-                if str(value) == str(path):
-                    registry_key = key
-                    break
-            
-            # レジストリキーが見つかった場合
-            if registry_key:
-                resolved_path = registry.get_path(registry_key)
-                if resolved_path and Path(resolved_path).exists():
-                    return resolved_path
-            
-            # 元の実装を使用
-            return original_normalize_path(path)
-        
-        # メソッドを置き換え
-        PathManager.normalize_path = staticmethod(patched_normalize_path)
-        
-        # LogManagerを修正して、ユーザードキュメントのログディレクトリを使用
-        from CreateProjectList.utils.log_manager import LogManager
-        
-        original_setup_logging = LogManager.setup_logging
-        
-        def patched_setup_logging(self, level: int = logging.INFO) -> None:
-            """ログ設定をユーザードキュメントフォルダに変更"""
-            try:
-                # ユーザードキュメントにログディレクトリを設定
-                user_log_dir = Path.home() / "Documents" / "ProjectSuite" / "logs"
-                user_log_file = user_log_dir / "document_processor.log"
-                
-                # ログディレクトリの保存
-                self.log_dir = user_log_dir
-                self.log_file = user_log_file
-                
-                # 元の処理を継続
-                original_setup_logging(self, level)
-                
-            except Exception as e:
-                # エラーが発生した場合は元の処理を呼び出す
-                print(f"ユーザーログディレクトリの設定に失敗: {e}")
-                original_setup_logging(self, level)
-        
-        # メソッドを置き換え
-        LogManager.setup_logging = patched_setup_logging
-        
-        logger.info("CreateProjectList設定アダプターを適用しました")
-        
-        return registry
-        
+    except ImportError as e:
+        logger.error(f"ConfigManager パッチの適用に失敗: インポートエラー {e}")
     except Exception as e:
-        logger.error(f"CreateProjectList設定アダプターエラー: {e}")
-        import traceback
+        logger.error(f"ConfigManager パッチの適用でエラー: {e}")
         logger.error(traceback.format_exc())
-        return None
 
-# 初期化時に自動適用（オプション）
+def _ensure_default_config():
+    """デフォルト設定ファイルを確保"""
+    try:
+        # ユーザーディレクトリの設定ファイルのパス
+        user_docs = Path.home() / "Documents" / "ProjectSuite"
+        config_path = user_docs / "CreateProjectList" / "config" / "config.json"
+        
+        # 設定ファイルが存在しない場合のみコピー
+        if not config_path.exists():
+            # ディレクトリ作成
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # パッケージ内のデフォルト設定ファイルを探す
+            package_root = Path(__file__).parent
+            default_config = package_root / "config" / "config.json"
+            
+            if default_config.exists():
+                shutil.copy2(default_config, config_path)
+                logger.info(f"デフォルト設定ファイルをコピー: {default_config} -> {config_path}")
+            else:
+                # デフォルト設定ファイルを探す別の場所
+                alt_config = package_root / "CreateProjectList" / "config" / "config.json"
+                if alt_config.exists():
+                    shutil.copy2(alt_config, config_path)
+                    logger.info(f"代替デフォルト設定ファイルをコピー: {alt_config} -> {config_path}")
+                else:
+                    # デフォルト設定を新規作成
+                    import json
+                    from datetime import datetime
+                    
+                    default_config_data = {
+                        "db_path": "",
+                        "last_input_folder": "",
+                        "last_output_folder": "",
+                        "replacement_rules": [
+                            {"search": "#案件名#", "replace": "project_name"},
+                            {"search": "#作成日#", "replace": "start_date"},
+                            {"search": "#工場#", "replace": "factory"},
+                            {"search": "#工程#", "replace": "process"},
+                            {"search": "#ライン#", "replace": "line"},
+                            {"search": "#作成者#", "replace": "manager"},
+                            {"search": "#確認者#", "replace": "reviewer"},
+                            {"search": "#承認者#", "replace": "approver"},
+                            {"search": "#事業部#", "replace": "division"}
+                        ],
+                        "last_update": datetime.now().isoformat(),
+                        "temp_dir": ""
+                    }
+                    
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                        json.dump(default_config_data, f, ensure_ascii=False, indent=2)
+                    
+                    logger.info(f"デフォルト設定ファイルを作成: {config_path}")
+            
+            registry = PathRegistry.get_instance()
+            registry.register_path(PathKeys.CPL_CONFIG_PATH, str(config_path))
+            
+    except Exception as e:
+        logger.error(f"デフォルト設定ファイルの確保に失敗: {e}")
+        logger.error(traceback.format_exc())
+
+# 初期化時に自動適用
 if __name__ != "__main__":
     try:
+        # デフォルト設定を確保
+        _ensure_default_config()
+        
+        # 設定のアダプテーション
         adapt_create_project_list_config()
         logger.info("CreateProjectList設定アダプターを自動適用しました")
     except Exception as e:

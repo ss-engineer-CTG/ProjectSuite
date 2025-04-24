@@ -1,3 +1,5 @@
+"""ロギングマネージャークラス"""
+
 import logging
 from pathlib import Path
 from typing import Optional
@@ -21,10 +23,28 @@ class LogManager:
             return
         self._initialized = True
         
-        # ログディレクトリの設定
-        self.log_dir = Path('logs')
-        self.log_file = self.log_dir / 'document_processor.log'
-        
+        # ログディレクトリの設定（PathRegistry使用）
+        try:
+            from PathRegistry import PathRegistry
+            from CreateProjectList.utils.path_constants import PathKeys
+            
+            registry = PathRegistry.get_instance()
+            logs_dir = registry.get_path(PathKeys.LOGS_DIR)
+            
+            if logs_dir:
+                self.log_dir = Path(logs_dir)
+                self.log_file = self.log_dir / 'document_processor.log'
+            else:
+                # ユーザードキュメント内のログディレクトリを使用
+                user_docs = Path.home() / "Documents" / "ProjectSuite" / "logs"
+                self.log_dir = user_docs
+                self.log_file = user_docs / 'document_processor.log'
+        except (ImportError, Exception):
+            # フォールバック: ユーザードキュメント内のログディレクトリ
+            user_docs = Path.home() / "Documents" / "ProjectSuite" / "logs"
+            self.log_dir = user_docs
+            self.log_file = user_docs / 'document_processor.log'
+            
         # ログフォーマットの設定
         self.log_format = '%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
         

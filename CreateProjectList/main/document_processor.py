@@ -13,6 +13,8 @@ from CreateProjectList.utils.db_context import DatabaseContext
 from CreateProjectList.processors.folder_processor import FolderProcessor
 from CreateProjectList.processors.document_processor_factory import DocumentProcessorFactory
 from CreateProjectList.utils.log_manager import LogManager
+from CreateProjectList.utils.path_manager import PathManager
+from CreateProjectList.utils.path_constants import PathKeys
 
 class DatabaseError(Exception):
     """データベース操作に関連するエラー"""
@@ -38,6 +40,14 @@ class DocumentProcessor:
         self.db_context = None
         self.current_project_data = None
         self.temp_dir = None
+        
+        # PathRegistryの初期化
+        try:
+            from PathRegistry import PathRegistry
+            self.registry = PathRegistry.get_instance()
+        except ImportError:
+            self.registry = None
+            self.logger.warning("PathRegistryを読み込めませんでした")
         
         # 設定の初期化
         self._initialize_config()
@@ -74,18 +84,18 @@ class DocumentProcessor:
     def _initialize_temp_dir(self) -> None:
         """一時ディレクトリの初期化"""
         try:
-            # ユーザードキュメント内のtempディレクトリを使用
-            user_temp_dir = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "temp"
+            # PathRegistryから一時ディレクトリを取得
+            if self.registry:
+                registry_temp_dir = self.registry.get_path(PathKeys.CPL_TEMP_DIR)
+                if registry_temp_dir:
+                    temp_path = Path(registry_temp_dir)
+                    temp_path.mkdir(parents=True, exist_ok=True)
+                    self.temp_dir = temp_path
+                    self.logger.info(f"PathRegistryから一時ディレクトリを設定: {self.temp_dir}")
+                    return
             
-            # PathRegistryから取得を試みる
-            try:
-                from PathRegistry import PathRegistry
-                registry = PathRegistry.get_instance()
-                registry_path = registry.get_path("CPL_TEMP_DIR")
-                if registry_path:
-                    user_temp_dir = Path(registry_path)
-            except ImportError:
-                pass
+            # ユーザードキュメント内の一時ディレクトリを使用
+            user_temp_dir = PathManager.get_user_directory() / "CreateProjectList" / "temp"
             
             # ディレクトリ作成
             try:
@@ -96,6 +106,11 @@ class DocumentProcessor:
                 # 権限エラーの場合はシステム一時ディレクトリを使用
                 self.temp_dir = Path(tempfile.mkdtemp(prefix="doc_processor_"))
                 self.logger.warning(f"権限エラーのため、システム一時ディレクトリを使用: {self.temp_dir}")
+            
+            # 設定マネージャーに保存
+            if self._config_manager:
+                self._config_manager.config['temp_dir'] = str(self.temp_dir)
+                self._config_manager.save_config()
             
         except Exception as e:
             self.logger.error(f"一時ディレクトリ作成エラー: {e}")
@@ -226,6 +241,8 @@ class DocumentProcessor:
                 }
 
             # ファイルの処理
+            processed_files = []
+            errors = []
             try:
                 processed_files, errors = self._process_files(
                     files,

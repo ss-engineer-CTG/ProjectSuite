@@ -66,17 +66,23 @@ class Config:
             from PathRegistry import PathRegistry
             registry = PathRegistry.get_instance()
             
-            # PROJECTS_DIR または OUTPUT_BASE_DIR を検索
-            for key in ["PROJECTS_DIR", "OUTPUT_BASE_DIR"]:
-                projects_dir = registry.get_path(key)
-                if projects_dir:
-                    return Path(projects_dir)
+            # OUTPUT_BASE_DIR を優先的に検索
+            output_dir = registry.get_path("OUTPUT_BASE_DIR")
+            if output_dir:
+                return Path(output_dir)
+            
+            # 後方互換性のためにPROJECTS_DIRもチェック
+            projects_dir = registry.get_path("PROJECTS_DIR")
+            if projects_dir:
+                return Path(projects_dir)
             
             # カスタムパスが設定されていない場合はデフォルトパスを返す
-            return cls.USER_DOC_DIR / "ProjectManager" / "data" / 'projects'
+            # デスクトップのprojectsフォルダを返すように変更
+            return Path.home() / "Desktop" / "projects"
         except ImportError:
             # PathRegistryが使えない場合はデフォルトパスを返す
-            return cls.USER_DOC_DIR / "ProjectManager" / "data" / 'projects'
+            # デスクトップのprojectsフォルダを返すように変更
+            return Path.home() / "Desktop" / "projects"
     
     # プロパティとして定義
     @property
@@ -117,28 +123,6 @@ class Config:
         'backup_enabled': True,
         'backup_dir': USER_DOC_DIR / 'backup'
     }
-    
-    @classmethod
-    def _get_default_paths(cls) -> List[Path]:
-        """優先順位付きのデフォルトファイルパスリストを取得"""
-        # PathRegistryからのパス取得を試みる
-        registry = PathRegistry.get_instance()
-        default_paths = []
-        
-        # 登録されたパスから検索
-        for key in ["DEFAULTS_FILE", "ROOT_DEFAULTS_FILE"]:
-            path = registry.get_path(key)
-            if path:
-                default_paths.append(Path(path))
-        
-        # ユーザードキュメントパスを優先
-        user_defaults = cls.USER_DOC_DIR / "defaults.txt"
-        if user_defaults.exists():
-            default_paths.insert(0, user_defaults)
-        
-        # 従来のパスも追加
-        default_paths.extend(cls.DEFAULT_VALUE_PATHS)
-        return default_paths
 
     @classmethod
     def setup_directories(cls):
@@ -184,21 +168,6 @@ class Config:
             
         # ドキュメント処理設定の出力先を更新
         cls.DOCUMENT_PROCESSOR['output_dir'] = output_dir
-            
-        # 従来の方法でも作成（後方互換性のため）
-        directories = [
-            cls.DATA_DIR,
-            cls.MASTER_DIR,
-            cls.MASTER_FOLDER,
-            output_dir,
-            cls.DASHBOARD_EXPORT_DIR,
-            cls.DOCUMENT_PROCESSOR['temp_dir'],
-            cls.DOCUMENT_PROCESSOR['backup_dir'],
-            cls.LOG_FILE.parent
-        ]
-        
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
 
     @classmethod
     def get_setting(cls, key: str, default: Any = None) -> Any:
@@ -213,25 +182,33 @@ class Config:
             設定値（存在しない場合はデフォルト値）
         """
         try:
-            settings = cls.load_settings()
-            return settings.get(key, default)
+            # まずJSON設定から取得を試みる
+            registry = PathRegistry.get_instance()
+            config = registry.get_config()
+            
+            if config and 'defaults' in config and key in config['defaults']:
+                return config['defaults'][key]
+            
+            # 次に旧設定ファイルから取得を試みる
+            legacy_settings = cls.load_settings()
+            if key in legacy_settings:
+                return legacy_settings[key]
+                
+            return default
         except Exception as e:
             logging.warning(f"設定の読み込みに失敗しました: {e}")
             return default
     
     @classmethod
     def load_settings(cls) -> Dict[str, str]:
-        """初期値設定ファイルから設定を読み込む"""
+        """初期値設定ファイルから設定を読み込む（後方互換性）"""
         settings = {}
         
-        for path in cls._get_default_paths():
-            logging.info(f"Checking settings file: {path}")
+        for path in cls.DEFAULT_VALUE_PATHS:
             if path.exists():
-                logging.info(f"Found settings file: {path}")
                 try:
                     with open(path, 'r', encoding='utf-8') as f:
                         content = f.read()
-                        logging.info(f"File content:\n{content}")
                         
                         # ファイルの内容を行ごとに処理
                         for line in content.splitlines():
@@ -240,11 +217,9 @@ class Config:
                                 try:
                                     key, value = [x.strip() for x in line.split('=', 1)]
                                     settings[key] = value
-                                    logging.info(f"Loaded setting: {key}={value}")
                                 except ValueError:
                                     logging.warning(f"Invalid setting line: {line}")
                     
-                    logging.info(f"Final settings: {settings}")
                     break
                     
                 except Exception as e:

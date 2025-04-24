@@ -8,6 +8,7 @@ import sys
 import logging
 import traceback
 import shutil
+import json
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from tkinter import messagebox
@@ -17,6 +18,8 @@ from datetime import datetime
 from PathRegistry import PathRegistry, get_path, ensure_dir
 # データ移行用のユーティリティをインポート
 from data_migrator import DataMigrator
+# プロジェクト移行ユーティリティをインポート
+from project_migrator import ProjectMigrator
 
 # アプリケーションのルートディレクトリを特定
 if getattr(sys, 'frozen', False):
@@ -90,6 +93,11 @@ def find_installer_and_copy_initialdata() -> bool:
         initialdata_copied = False
         copy_errors = []
         
+        # デスクトップ上にprojectsディレクトリを作成
+        desktop_projects_dir = Path.home() / "Desktop" / "projects"
+        desktop_projects_dir.mkdir(parents=True, exist_ok=True)
+        print(f"デスクトップにプロジェクトディレクトリを作成: {desktop_projects_dir}")
+        
         for path in search_paths:
             if not path.exists():
                 continue
@@ -115,7 +123,7 @@ def find_installer_and_copy_initialdata() -> bool:
                     pm_data_dir.mkdir(parents=True, exist_ok=True)
                     
                     # 各サブディレクトリを作成
-                    subdirs = ["exports", "master", "projects", "templates"]
+                    subdirs = ["exports", "master", "templates"]  # projectsは別途処理
                     for subdir in subdirs:
                         subdir_path = pm_data_dir / subdir
                         subdir_path.mkdir(parents=True, exist_ok=True)
@@ -137,15 +145,19 @@ def find_installer_and_copy_initialdata() -> bool:
                         src_db = initialdata_path / "projects.db"
                         if src_db.exists():
                             dst_db = pm_data_dir / "projects.db"
-                            try:
-                                shutil.copy2(src_db, dst_db)
-                                print(f"データベースファイルをコピーしました: {dst_db}")
-                            except PermissionError:
-                                print(f"データベースコピー権限エラー: {dst_db}へのアクセスが拒否されました")
-                                copy_errors.append(f"DB: {dst_db}")
-                            except Exception as db_err:
-                                print(f"データベースコピーエラー: {db_err}")
-                                copy_errors.append(f"DB: {str(db_err)}")
+                            # データベースが既に存在する場合はスキップ（修正済み）
+                            if not dst_db.exists():
+                                try:
+                                    shutil.copy2(src_db, dst_db)
+                                    print(f"データベースファイルをコピーしました: {dst_db}")
+                                except PermissionError:
+                                    print(f"データベースコピー権限エラー: {dst_db}へのアクセスが拒否されました")
+                                    copy_errors.append(f"DB: {dst_db}")
+                                except Exception as db_err:
+                                    print(f"データベースコピーエラー: {db_err}")
+                                    copy_errors.append(f"DB: {str(db_err)}")
+                            else:
+                                print(f"データベースファイルは既に存在するためスキップしました: {dst_db}")
                     except Exception as db_ex:
                         print(f"データベース処理エラー: {db_ex}")
                         copy_errors.append(f"DB処理: {str(db_ex)}")
@@ -185,7 +197,26 @@ def find_installer_and_copy_initialdata() -> bool:
                             print(f"  {subdir}ディレクトリ処理エラー: {dir_err}")
                             copy_errors.append(f"{subdir}: {str(dir_err)}")
                     
-                    # 3. 初期化完了マークの作成
+                    # 3. projects関連のコピー処理をデスクトップ向けに変更
+                    src_projects_dir = initialdata_path / "projects"
+                    if src_projects_dir.exists() and src_projects_dir.is_dir():
+                        # projectsディレクトリの内容をデスクトップのprojectsディレクトリにコピー
+                        try:
+                            for src_file in src_projects_dir.glob("**/*"):
+                                if src_file.is_file():
+                                    rel_path = src_file.relative_to(src_projects_dir)
+                                    dst_file = desktop_projects_dir / rel_path
+                                    dst_file.parent.mkdir(parents=True, exist_ok=True)
+                                    
+                                    # 既存ファイルは上書きしない（修正済み）
+                                    if not dst_file.exists():
+                                        shutil.copy2(src_file, dst_file)
+                                        print(f"  プロジェクトファイルをコピー: {dst_file}")
+                        except Exception as e:
+                            print(f"  プロジェクトファイルコピーエラー: {e}")
+                            copy_errors.append(f"プロジェクトディレクトリ: {str(e)}")
+                    
+                    # 4. 初期化完了マークの作成
                     try:
                         init_flag = target_dir / ".init_complete"
                         with open(init_flag, 'w') as f:
@@ -195,7 +226,7 @@ def find_installer_and_copy_initialdata() -> bool:
                         print(f"初期化マーク作成エラー: {flag_err}")
                         copy_errors.append(f"初期化マーク: {str(flag_err)}")
                     
-                    # 4. コピー結果の確認
+                    # 5. コピー結果の確認
                     if copy_errors:
                         print(f"一部のファイルコピーに失敗しました ({len(copy_errors)}件):")
                         for err in copy_errors[:5]:  # 最初の5件のみ表示
@@ -244,6 +275,10 @@ def try_copy_critical_files() -> bool:
         target_dir = Path.home() / "Documents" / "ProjectSuite"
         pm_data_dir = target_dir / "ProjectManager" / "data"
         
+        # デスクトップのprojectsフォルダを作成
+        desktop_projects_dir = Path.home() / "Desktop" / "projects"
+        desktop_projects_dir.mkdir(parents=True, exist_ok=True)
+        
         # 重要なファイルリスト (ソース相対パス, 宛先絶対パス)
         critical_files = [
             ("projects.db", pm_data_dir / "projects.db"),
@@ -260,6 +295,12 @@ def try_copy_critical_files() -> bool:
         success_count = 0
         
         for src_rel_path, dst_path in critical_files:
+            # データベースファイルは既に存在する場合はスキップ（ここが修正点）
+            if src_rel_path == "projects.db" and dst_path.exists():
+                print(f"データベースファイルは既に存在するためスキップしました: {dst_path}")
+                success_count += 1
+                continue
+                
             for search_path in search_paths:
                 src_path = search_path / src_rel_path
                 if src_path.exists() and src_path.is_file():
@@ -271,9 +312,27 @@ def try_copy_critical_files() -> bool:
                         shutil.copy2(src_path, dst_path)
                         print(f"重要ファイルをコピーしました: {src_path} -> {dst_path}")
                         success_count += 1
-                        break  # このファイルのコピーに成功したら次のファイルへ
+                        break
                     except Exception as e:
                         print(f"ファイルコピーエラー ({src_path}): {e}")
+        
+        # プロジェクトデータのコピー
+        for search_path in search_paths:
+            projects_src = search_path / "projects"
+            if projects_src.exists() and projects_src.is_dir():
+                try:
+                    for src_file in projects_src.glob("**/*"):
+                        if src_file.is_file():
+                            rel_path = src_file.relative_to(projects_src)
+                            dst_file = desktop_projects_dir / rel_path
+                            dst_file.parent.mkdir(parents=True, exist_ok=True)
+                            
+                            # 既存ファイルは上書きしない（修正済み）
+                            if not dst_file.exists():
+                                shutil.copy2(src_file, dst_file)
+                                print(f"プロジェクトファイルをコピー: {dst_file}")
+                except Exception as e:
+                    print(f"プロジェクトファイルコピーエラー: {e}")
         
         return success_count > 0
         
@@ -286,6 +345,55 @@ def initialize_sample_data():
     try:
         print("サンプルデータの初期化を開始します...")
         
+        # データベースファイルのパスを準備
+        target_dir = Path.home() / "Documents" / "ProjectSuite"
+        target_data_dir = target_dir / "ProjectManager" / "data"
+        db_path = target_data_dir / "projects.db"
+        
+        # 既にDBが存在する場合はデータベースの初期化をスキップ（ここが修正点）
+        if db_path.exists():
+            print(f"既存のデータベースファイルが見つかりました: {db_path}")
+            print("データベースの初期化はスキップします")
+            
+            # 必要なディレクトリだけを確保
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_data_dir.mkdir(parents=True, exist_ok=True)
+            
+            # デスクトップのprojectsディレクトリを作成
+            desktop_projects_dir = Path.home() / "Desktop" / "projects"
+            desktop_projects_dir.mkdir(parents=True, exist_ok=True)
+            print(f"デスクトップにプロジェクトディレクトリを作成しました: {desktop_projects_dir}")
+            
+            # CreateProjectList用のディレクトリも作成
+            cpl_dir = target_dir / "CreateProjectList"
+            cpl_dir.mkdir(parents=True, exist_ok=True)
+            (cpl_dir / "config").mkdir(parents=True, exist_ok=True)
+            (cpl_dir / "temp").mkdir(parents=True, exist_ok=True)
+            (cpl_dir / "templates").mkdir(parents=True, exist_ok=True)
+            (cpl_dir / "cache").mkdir(parents=True, exist_ok=True)
+            
+            # 必要なディレクトリを作成
+            logs_dir = target_dir / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            
+            for subdir in ["temp", "backup"]:
+                (target_dir / subdir).mkdir(parents=True, exist_ok=True)
+            
+            # CreateProjectList用の設定ファイルを作成
+            create_cpl_config_file(cpl_dir)
+            
+            # 初期化完了マークを作成
+            try:
+                init_flag = target_dir / ".init_complete"
+                with open(init_flag, 'w') as f:
+                    f.write(datetime.now().isoformat())
+                print("初期化完了マークを作成しました")
+            except Exception as e:
+                print(f"初期化マーク作成エラー: {e}")
+            
+            print("初期ディレクトリの作成が完了しました")
+            return True
+            
         # 1. まず新しいアプローチでinitialdataのコピーを試みる
         if find_installer_and_copy_initialdata():
             print("インストーラーからinitialdataをコピーしました")
@@ -303,6 +411,11 @@ def initialize_sample_data():
         target_data_dir = target_dir / "ProjectManager" / "data"
         target_dir.mkdir(parents=True, exist_ok=True)
         target_data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # デスクトップのprojectsディレクトリを作成
+        desktop_projects_dir = Path.home() / "Desktop" / "projects"
+        desktop_projects_dir.mkdir(parents=True, exist_ok=True)
+        print(f"デスクトップにプロジェクトディレクトリを作成しました: {desktop_projects_dir}")
         
         # CreateProjectList用のディレクトリも作成
         cpl_dir = target_dir / "CreateProjectList"
@@ -327,7 +440,7 @@ def initialize_sample_data():
             print("initialdataフォルダが見つかりました。ファイルをコピーします...")
             
             # サブディレクトリの作成とコピー
-            for subdir in ["exports", "master", "projects", "templates"]:
+            for subdir in ["exports", "master", "templates"]:  # projectsは別処理
                 target_subdir = target_data_dir / subdir
                 target_subdir.mkdir(parents=True, exist_ok=True)
                 
@@ -345,6 +458,21 @@ def initialize_sample_data():
                             except Exception as e:
                                 print(f"  ファイルコピーエラー ({src_file.name}): {e}")
             
+            # projectsディレクトリの内容はデスクトップにコピー
+            src_projects_dir = source_data / "projects"
+            if src_projects_dir.exists():
+                try:
+                    for src_file in src_projects_dir.glob("**/*"):
+                        if src_file.is_file():
+                            rel_path = src_file.relative_to(src_projects_dir)
+                            dst_file = desktop_projects_dir / rel_path
+                            dst_file.parent.mkdir(parents=True, exist_ok=True)
+                            if not dst_file.exists():  # 既存ファイルを上書きしない
+                                shutil.copy2(src_file, dst_file)
+                                print(f"  プロジェクトファイルをデスクトップにコピー: {rel_path}")
+                except Exception as e:
+                    print(f"  プロジェクトファイルコピーエラー: {e}")
+                    
             # CreateProjectList用のデータもコピー
             src_cpl_dir = source_data / "CreateProjectList"
             if src_cpl_dir.exists():
@@ -409,7 +537,7 @@ def create_cpl_config_file(cpl_dir: Path) -> None:
         config = {
             "db_path": str(user_dir / "ProjectManager" / "data" / "projects.db"),
             "last_input_folder": str(user_dir / "ProjectManager" / "data" / "templates"),
-            "last_output_folder": str(user_dir / "ProjectManager" / "data" / "projects"),
+            "last_output_folder": str(Path.home() / "Desktop" / "projects"),  # デスクトップに変更
             "replacement_rules": [
                 {"search": "#案件名#", "replace": "project_name"},
                 {"search": "#作成日#", "replace": "start_date"},
@@ -551,6 +679,81 @@ def setup_logging() -> None:
     except Exception as e:
         print(f"ログ設定の初期化に失敗しました: {e}")
 
+def update_database_paths() -> Dict[str, Any]:
+    """
+    データベース内のプロジェクトパスを更新
+    
+    Returns:
+        Dict[str, Any]: 更新結果
+    """
+    result = {
+        "success": False,
+        "updated_count": 0,
+        "errors": []
+    }
+    
+    conn = None
+    try:
+        # データベースのパスを取得
+        try:
+            from PathRegistry import PathRegistry
+            registry = PathRegistry.get_instance()
+            db_path = registry.get_path("DB_PATH")
+        except ImportError:
+            db_path = str(Path.home() / "Documents" / "ProjectSuite" / "ProjectManager" / "data" / "projects.db")
+        
+        # データベースの存在確認
+        if not Path(db_path).exists():
+            result["errors"].append(f"データベースファイルが見つかりません: {db_path}")
+            return result
+        
+        # データベースに接続
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # 更新に使用するパスパターン
+        old_path_pattern = str(Path.home() / "Documents" / "ProjectSuite" / "ProjectManager" / "data" / "projects")
+        new_path_pattern = str(Path.home() / "Desktop" / "projects")
+        
+        # プロジェクトパスの更新
+        cursor.execute(
+            "UPDATE projects SET project_path = REPLACE(project_path, ?, ?) WHERE project_path LIKE ?",
+            (old_path_pattern, new_path_pattern, f"{old_path_pattern}%")
+        )
+        project_count = cursor.rowcount
+        
+        # ガントチャートパスの更新
+        cursor.execute(
+            "UPDATE projects SET ganttchart_path = REPLACE(ganttchart_path, ?, ?) WHERE ganttchart_path LIKE ?",
+            (old_path_pattern, new_path_pattern, f"{old_path_pattern}%")
+        )
+        gantt_count = cursor.rowcount
+        
+        # 変更を確定
+        conn.commit()
+        
+        result["success"] = True
+        result["updated_count"] = project_count + gantt_count
+        logging.info(f"データベース内のパス参照を更新: プロジェクト {project_count}件, ガントチャート {gantt_count}件")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"データベース更新エラー: {e}\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        result["errors"].append(error_msg)
+        
+        # ロールバック
+        if conn:
+            conn.rollback()
+            
+        return result
+        
+    finally:
+        # 接続のクローズ
+        if conn:
+            conn.close()
+
 def setup_environment() -> None:
     """
     アプリケーション環境のセットアップ
@@ -571,6 +774,11 @@ def setup_environment() -> None:
         user_docs_dir = Path.home() / "Documents" / "ProjectSuite"
         registry.register_path("USER_DATA_DIR", str(user_docs_dir))
         
+        # デスクトップのプロジェクトディレクトリを登録
+        desktop_projects_dir = Path.home() / "Desktop" / "projects"
+        registry.register_path("PROJECTS_DIR", str(desktop_projects_dir))
+        registry.register_path("OUTPUT_BASE_DIR", str(desktop_projects_dir))
+        
         # 初回起動かどうかの確認
         is_first_run = registry.check_first_run()
         
@@ -580,10 +788,24 @@ def setup_environment() -> None:
             # 初期データの配置を実行
             initialize_sample_data()
             
+            # レガシー設定のJSON形式への移行
+            registry.migrate_legacy_config()
+            
         else:
-            # 毎回起動時に権限エラーなしの再コピー処理を行う
-            try_copy_critical_files()
+            # JSON形式への設定移行確認（初回以外でも実行）
+            registry.migrate_legacy_config()
+            
+            # 必要なディレクトリだけ作成（データのコピーはなし）（修正点）
+            user_docs_dir.mkdir(parents=True, exist_ok=True)
+            data_dir = user_docs_dir / "ProjectManager" / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            desktop_projects_dir.mkdir(parents=True, exist_ok=True)
+            
             logging.info("既存のユーザーデータディレクトリを使用します。")
+            
+            # 新しいOUTPUT_BASE_DIRへの移行対応
+            # データベース内のパス参照を更新
+            update_database_paths()
         
         # 診断を実行して問題を検出
         diagnosis = registry.diagnose()
@@ -598,7 +820,7 @@ def setup_environment() -> None:
         ensure_dir("DATA_DIR")
         ensure_dir("EXPORTS_DIR")
         ensure_dir("TEMPLATES_DIR")
-        ensure_dir("PROJECTS_DIR")
+        ensure_dir("OUTPUT_BASE_DIR")  # OUTPUT_BASE_DIRの確保
         ensure_dir("MASTER_DIR")
         ensure_dir("TEMP_DIR")
         ensure_dir("BACKUP_DIR")
@@ -613,36 +835,18 @@ def setup_environment() -> None:
         # CreateProjectList設定ファイルの移行処理
         migrate_cpl_files()
                 
-        # defaults.txtの確認
-        defaults_path = APP_ROOT / "defaults.txt"
-        if not defaults_path.exists():
-            # ProjectManagerからコピー
-            source = APP_ROOT / "ProjectManager" / "defaults.txt"
-            if source.exists():
-                try:
-                    shutil.copy(source, defaults_path)
-                    print(f"デフォルト設定ファイルをコピー: {source} -> {defaults_path}")
-                except Exception as e:
-                    print(f"デフォルト設定ファイルコピーエラー: {e}")
-            else:
-                # デフォルト内容で新規作成
-                try:
-                    with open(defaults_path, "w", encoding="utf-8") as f:
-                        f.write("""default_project_name=新規プロジェクト
-default_manager=山田太郎
-default_reviewer=鈴木一郎
-default_approver=佐藤部長
-default_division=D001
-default_factory=F001
-default_process=P001
-default_line=L001""")
-                    print(f"デフォルト設定ファイルを作成: {defaults_path}")
-                except Exception as e:
-                    print(f"デフォルト設定ファイル作成エラー: {e}")
+        # config.jsonの確認と初期化
+        config_file = user_docs_dir / "config.json"
+        if not config_file.exists():
+            try:
+                # ConfigManagerを使用して初期化
+                from ProjectManager.src.core.config_manager import ConfigManager
+                ConfigManager()
+                logging.info(f"設定ファイルを初期化しました: {config_file}")
+            except Exception as e:
+                logging.error(f"設定ファイルの初期化に失敗: {e}")
         
-        # Pythonバージョンの確認
-        if not check_python_version():
-            print("警告: Python 3.8.0以上を推奨します")
+        logging.info("環境設定が完了しました")
             
     except Exception as e:
         print(f"環境設定エラー: {e}")
@@ -715,9 +919,6 @@ def initialize_app() -> Optional[DatabaseManager]:
             logging.info("ProjectManager設定アダプターを適用しました")
         except Exception as e:
             logging.warning(f"設定アダプター適用エラー: {e}")
-        
-        # ディレクトリ構造の作成
-        Config.setup_directories()
         
         # ログ設定
         setup_logging()
@@ -851,13 +1052,18 @@ def main() -> None:
         if sys.argv[1] == "init-data":
             success = initialize_sample_data()
             sys.exit(0 if success else 1)
+        # 特殊コマンド：プロジェクト移行
+        elif sys.argv[1] == "migrate-projects":
+            from project_migrator import ProjectMigrator
+            success = ProjectMigrator.run_migration()
+            sys.exit(0 if success and success.get('success', False) else 1)
         else:
             app_name = sys.argv[1]
             app_args = sys.argv[2:]
             sys.exit(run_standalone_app(app_name, *app_args))
     
-    # 通常起動時も一度コピーを試みる
-    try_copy_critical_files()
+    # 初期化処理（データベースのコピーはinitialize_appとsetup_environment内で条件付きに実行）
+    # 修正したので既存のDBファイルが存在する場合は上書きされない
     
     # メインアプリケーション（ProjectManager）の起動
     db_manager = None
@@ -866,6 +1072,46 @@ def main() -> None:
         db_manager = initialize_app()
         if not db_manager:
             return
+        
+        # 既存ユーザーの場合、プロジェクト移行を提案
+        old_projects_dir = Path.home() / "Documents" / "ProjectSuite" / "ProjectManager" / "data" / "projects"
+        new_projects_dir = Path.home() / "Desktop" / "projects"
+        
+        if (old_projects_dir.exists() and any(old_projects_dir.iterdir()) and 
+            (not new_projects_dir.exists() or not any(new_projects_dir.iterdir()))):
+            
+            # 移行提案ダイアログを表示
+            if messagebox.askyesno(
+                "プロジェクトデータの移行",
+                "プロジェクトの保存先が変更されました。\n"
+                "既存のプロジェクトデータを新しい場所に移行しますか？\n\n"
+                f"移行元: {old_projects_dir}\n"
+                f"移行先: {new_projects_dir}"
+            ):
+                try:
+                    from project_migrator import ProjectMigrator
+                    migrator = ProjectMigrator(str(new_projects_dir))
+                    result = migrator.migrate_projects(overwrite=False)
+                    
+                    if result["success"]:
+                        messagebox.showinfo(
+                            "移行完了",
+                            f"{result['migrated']}件のプロジェクトを移行しました。\n"
+                            "データベース内のパス参照も更新されました。"
+                        )
+                    else:
+                        messagebox.showerror(
+                            "移行エラー",
+                            f"プロジェクトの移行中にエラーが発生しました。\n"
+                            f"{result['migrated']}件のプロジェクトは移行されました。\n"
+                            "詳細はログファイルを確認してください。"
+                        )
+                except Exception as e:
+                    logging.error(f"プロジェクト移行エラー: {e}")
+                    messagebox.showerror(
+                        "移行エラー",
+                        f"プロジェクトの移行中にエラーが発生しました。\n{e}"
+                    )
         
         # GUIの起動
         app = DashboardGUI(db_manager)

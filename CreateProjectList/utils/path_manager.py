@@ -1,11 +1,15 @@
-# path_manager.py
+"""パス管理ユーティリティ"""
 
 from pathlib import Path
 import os
 from typing import Optional
+import logging
+from CreateProjectList.utils.log_manager import LogManager
 
 class PathManager:
     """パス管理クラス"""
+    
+    logger = LogManager().get_logger(__name__)
     
     @staticmethod
     def normalize_path(path: str) -> str:
@@ -35,11 +39,23 @@ class PathManager:
                     resolved_path = registry.get_path(key)
                     if resolved_path:
                         return str(resolved_path)
+                        
+            # キーではなくパス文字列が直接一致する場合
+            registry_paths = registry.get_all_paths()
+            if path in registry_paths:
+                return registry_paths[path]
+                
         except ImportError:
-            pass  # PathRegistryが使えない場合は通常の正規化に進む
+            PathManager.logger.debug("PathRegistryが使用できません。基本的なパス正規化を使用します。")
+        except Exception as e:
+            PathManager.logger.warning(f"レジストリによるパス解決エラー: {e}")
             
-        normalized = str(Path(path).resolve())
-        return normalized
+        try:
+            normalized = str(Path(path).resolve())
+            return normalized
+        except Exception as e:
+            PathManager.logger.warning(f"パス正規化エラー: {e}")
+            return path
     
     @staticmethod
     def is_valid_path(path: str) -> bool:
@@ -59,25 +75,36 @@ class PathManager:
             path_obj = Path(path)
             # 絶対パスであることを確認
             return path_obj.is_absolute()
-        except Exception:
+        except Exception as e:
+            PathManager.logger.warning(f"パス検証エラー: {e}")
             return False
     
     @staticmethod
-    def ensure_directory(path: str) -> None:
+    def ensure_directory(path: str) -> bool:
         """
         ディレクトリの存在確認と作成
         
         Args:
             path: 確認/作成するディレクトリパス
+            
+        Returns:
+            bool: 成功時True
         """
         if not path:
-            return
+            return False
             
-        dir_path = Path(path)
-        if not dir_path.exists():
-            dir_path.mkdir(parents=True)
-        elif not dir_path.is_dir():
-            raise ValueError(f"{path} is not a directory")
+        try:
+            dir_path = Path(path)
+            if not dir_path.exists():
+                dir_path.mkdir(parents=True, exist_ok=True)
+                PathManager.logger.info(f"ディレクトリを作成: {dir_path}")
+            elif not dir_path.is_dir():
+                PathManager.logger.warning(f"{path} はディレクトリではありません")
+                return False
+            return True
+        except Exception as e:
+            PathManager.logger.error(f"ディレクトリ作成エラー: {e}")
+            return False
     
     @staticmethod
     def get_relative_path(path: str, base_path: str) -> str:
@@ -175,3 +202,23 @@ class PathManager:
             result = "unnamed"
             
         return result
+        
+    @staticmethod
+    def get_user_directory() -> Path:
+        """
+        アプリケーション用のユーザードキュメントディレクトリを取得
+        
+        Returns:
+            Path: ユーザードキュメントディレクトリ
+        """
+        try:
+            from PathRegistry import PathRegistry
+            registry = PathRegistry.get_instance()
+            user_dir = registry.get_path("USER_DATA_DIR")
+            if user_dir:
+                return Path(user_dir)
+        except Exception:
+            pass
+            
+        # デフォルトのユーザードキュメントディレクトリ
+        return Path.home() / "Documents" / "ProjectSuite"

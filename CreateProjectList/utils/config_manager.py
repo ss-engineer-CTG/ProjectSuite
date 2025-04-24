@@ -8,8 +8,10 @@ import os
 import shutil
 from datetime import datetime
 import tempfile
+import traceback
 from CreateProjectList.utils.path_manager import PathManager
 from CreateProjectList.utils.log_manager import LogManager
+from CreateProjectList.utils.path_constants import PathKeys
 
 class ConfigManager:
     """設定管理クラス"""
@@ -46,30 +48,30 @@ class ConfigManager:
         else:
             # PathRegistryから設定ファイルパスを優先的に取得
             if self.registry:
-                registry_path = self.registry.get_path("CPL_CONFIG_PATH")
+                registry_path = self.registry.get_path(PathKeys.CPL_CONFIG_PATH)
                 if registry_path:
                     self.config_file = Path(registry_path)
                     self.logger.info(f"PathRegistryから設定ファイルパスを取得: {registry_path}")
                 else:
-                    # ユーザーディレクトリにある設定ファイル
-                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+                    # ユーザードキュメントフォルダにある設定ファイル
+                    user_config = self._get_user_config_path()
                     if user_config.exists():
                         self.config_file = user_config
                         self.logger.info(f"ユーザードキュメントから設定ファイルパスを取得: {user_config}")
                     else:
                         # パッケージ内の設定ファイル
-                        self.config_file = self.package_root / "config" / "config.json"
+                        self.config_file = self.default_config_path
                         self.logger.info(f"パッケージから設定ファイルパスを取得: {self.config_file}")
             else:
                 # デフォルトパス
-                self.config_file = self.package_root / "config" / "config.json"
+                self.config_file = self._get_user_config_path()
         
         # configフォルダがない場合は作成を試みる
         try:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             # 権限エラーの場合はユーザーフォルダに変更
-            user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+            user_config = self._get_user_config_path()
             user_config.parent.mkdir(parents=True, exist_ok=True)
             self.config_file = user_config
             self.logger.info(f"設定ファイルをユーザードキュメントに変更: {user_config}")
@@ -85,7 +87,65 @@ class ConfigManager:
             self.config = self._load_default_config()
             
         self.load_config()
+        
+        # パスの初期化とレジストリへの登録
+        self.initialize_config_paths()
+        
         self.logger.info("ConfigManager initialized")
+
+    def _get_user_config_path(self) -> Path:
+        """ユーザー設定ファイルのパスを取得"""
+        user_docs = Path.home() / "Documents" / "ProjectSuite"
+        
+        if self.registry:
+            user_docs_from_registry = self.registry.get_path(PathKeys.USER_DATA_DIR)
+            if user_docs_from_registry:
+                user_docs = Path(user_docs_from_registry)
+        
+        return user_docs / "CreateProjectList" / "config" / "config.json"
+
+    def initialize_config_paths(self):
+        """パスを初期化してPathRegistryに登録"""
+        try:
+            if not self.registry:
+                return
+            
+            # ユーザードキュメントのベースパス
+            user_docs = Path.home() / "Documents" / "ProjectSuite"
+            if self.registry.get_path(PathKeys.USER_DATA_DIR):
+                user_docs = Path(self.registry.get_path(PathKeys.USER_DATA_DIR))
+            
+            # 基本パスの登録
+            paths = {
+                PathKeys.CPL_CONFIG_PATH: str(self.config_file),
+                PathKeys.CPL_DIR: str(user_docs / "CreateProjectList"),
+                PathKeys.CPL_CONFIG_DIR: str(user_docs / "CreateProjectList" / "config"),
+                PathKeys.CPL_TEMP_DIR: str(user_docs / "CreateProjectList" / "temp"),
+                PathKeys.CPL_TEMPLATES_DIR: str(user_docs / "CreateProjectList" / "templates"),
+                PathKeys.CPL_CACHE_DIR: str(user_docs / "CreateProjectList" / "cache")
+            }
+            
+            # パスの登録とディレクトリの作成
+            for key, path in paths.items():
+                self.registry.register_path(key, path)
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                
+            # ConfigからPathRegistryへの同期
+            if self.config.get('db_path'):
+                self.registry.register_path(PathKeys.PM_DB_PATH, self.config['db_path'])
+                
+            if self.config.get('last_input_folder'):
+                self.registry.register_path(PathKeys.CPL_INPUT_FOLDER, self.config['last_input_folder'])
+                
+            if self.config.get('last_output_folder'):
+                self.registry.register_path(PathKeys.CPL_OUTPUT_FOLDER, self.config['last_output_folder'])
+                
+            # 一時ディレクトリのパスを更新
+            temp_dir = self.get_temp_dir()
+            self.config['temp_dir'] = temp_dir
+            
+        except Exception as e:
+            self.logger.error(f"パス初期化エラー: {e}")
 
     def initialize_with_parent_config(self, parent_config: Dict[str, Any]) -> None:
         """
@@ -118,7 +178,8 @@ class ConfigManager:
                 self.config['db_path'] = self.parent_config['db_path']
             
             # 一時ディレクトリの設定
-            self.config['temp_dir'] = str(Path(tempfile.gettempdir()) / "doc_processor")
+            temp_dir = self.get_temp_dir()
+            self.config['temp_dir'] = temp_dir
             
             self.save_config()
             
@@ -139,7 +200,7 @@ class ConfigManager:
             'last_output_folder': '',
             'replacement_rules': self._get_default_rules(),
             'last_update': datetime.now().isoformat(),
-            'temp_dir': str(Path(tempfile.gettempdir()) / "doc_processor")
+            'temp_dir': self.get_temp_dir()
         }
         self.logger.debug(f"デフォルト設定を作成: {default_config}")
         return default_config
@@ -213,7 +274,7 @@ class ConfigManager:
             except Exception as e:
                 # 権限エラーの場合はユーザードキュメントを使用
                 self.logger.warning(f"設定ディレクトリ作成エラー: {e}")
-                user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+                user_config = self._get_user_config_path()
                 user_config.parent.mkdir(parents=True, exist_ok=True)
                 self.config_file = user_config
                 self.logger.info(f"設定ファイルをユーザードキュメントに変更: {user_config}")
@@ -225,7 +286,6 @@ class ConfigManager:
                 self.config['last_output_folder'] = str(Path(self.config['last_output_folder']).resolve())
             
             # 最終更新日時の更新
-            from datetime import datetime
             self.config['last_update'] = datetime.now().isoformat()
             
             # 設定の保存
@@ -236,12 +296,12 @@ class ConfigManager:
                 
                 # レジストリにパスを登録
                 if self.registry:
-                    self.registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
+                    self.registry.register_path(PathKeys.CPL_CONFIG_PATH, str(self.config_file))
             except Exception as e:
                 self.logger.error(f"設定保存エラー: {e}")
                 # ユーザードキュメントにフォールバック
                 try:
-                    user_config = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "config" / "config.json"
+                    user_config = self._get_user_config_path()
                     user_config.parent.mkdir(parents=True, exist_ok=True)
                     with open(user_config, 'w', encoding='utf-8') as f:
                         json.dump(self.config, f, ensure_ascii=False, indent=2)
@@ -250,7 +310,7 @@ class ConfigManager:
                     
                     # レジストリにパスを登録
                     if self.registry:
-                        self.registry.register_path("CPL_CONFIG_PATH", str(self.config_file))
+                        self.registry.register_path(PathKeys.CPL_CONFIG_PATH, str(self.config_file))
                 except Exception as fallback_e:
                     self.logger.error(f"フォールバック保存エラー: {fallback_e}")
                     raise
@@ -282,16 +342,16 @@ class ConfigManager:
         """
         try:
             # 必須キーの存在確認
-            required_keys = {'db_path', 'last_input_folder', 'last_output_folder', 'replacement_rules'}
+            required_keys = {'replacement_rules'}
             if not all(key in self.config for key in required_keys):
                 self.logger.error("必須キーが不足しています")
                 return False
             
             # パスの妥当性確認
             paths_to_check = [
-                ('db_path', self.config['db_path']),
-                ('last_input_folder', self.config['last_input_folder']),
-                ('last_output_folder', self.config['last_output_folder'])
+                ('db_path', self.get_db_path()),
+                ('last_input_folder', self.get_input_folder()),
+                ('last_output_folder', self.get_output_folder())
             ]
             
             for key, path in paths_to_check:
@@ -317,9 +377,17 @@ class ConfigManager:
         Returns:
             str: データベースファイルのパス
         """
+        # PathRegistryからの取得を試みる
+        if self.registry:
+            db_path = self.registry.get_path(PathKeys.PM_DB_PATH)
+            if db_path:
+                return db_path
+        
         # 親設定のパスを優先
         if self.parent_config and 'db_path' in self.parent_config:
             return self.parent_config['db_path']
+        
+        # 構成ファイルから取得
         return self.config.get('db_path', '')
     
     def set_db_path(self, path: str) -> None:
@@ -332,6 +400,11 @@ class ConfigManager:
         try:
             normalized_path = PathManager.normalize_path(path)
             self.config['db_path'] = normalized_path
+            
+            # PathRegistryにも登録
+            if self.registry:
+                self.registry.register_path(PathKeys.PM_DB_PATH, normalized_path)
+                
             self.save_config()
             self.logger.info(f"データベースパスを更新: {normalized_path}")
         except Exception as e:
@@ -345,9 +418,22 @@ class ConfigManager:
         Returns:
             str: 入力フォルダのパス
         """
+        # PathRegistryからの取得を試みる
+        if self.registry:
+            input_folder = self.registry.get_path(PathKeys.CPL_INPUT_FOLDER)
+            if input_folder:
+                return input_folder
+                
+            # 代替としてテンプレートディレクトリを試す
+            templates_dir = self.registry.get_path(PathKeys.PM_TEMPLATES_DIR)
+            if templates_dir:
+                return templates_dir
+        
         # 親設定のパスを優先
         if self.parent_config and 'paths' in self.parent_config:
             return self.parent_config['paths'].get('template_dir', '')
+            
+        # 構成ファイルから取得
         return self.config.get('last_input_folder', '')
     
     def set_input_folder(self, path: str) -> None:
@@ -360,6 +446,11 @@ class ConfigManager:
         try:
             normalized_path = PathManager.normalize_path(path)
             self.config['last_input_folder'] = normalized_path
+            
+            # PathRegistryにも登録
+            if self.registry:
+                self.registry.register_path(PathKeys.CPL_INPUT_FOLDER, normalized_path)
+                
             self.save_config()
             self.logger.info(f"入力フォルダを更新: {normalized_path}")
         except Exception as e:
@@ -373,9 +464,22 @@ class ConfigManager:
         Returns:
             str: 出力フォルダのパス
         """
+        # PathRegistryからの取得を試みる
+        if self.registry:
+            output_folder = self.registry.get_path(PathKeys.CPL_OUTPUT_FOLDER)
+            if output_folder:
+                return output_folder
+                
+            # 代替としてプロジェクトディレクトリを試す
+            projects_dir = self.registry.get_path(PathKeys.PM_PROJECTS_DIR)
+            if projects_dir:
+                return projects_dir
+        
         # 親設定のパスを優先
         if self.parent_config and 'paths' in self.parent_config:
             return self.parent_config['paths'].get('output_dir', '')
+            
+        # 構成ファイルから取得
         return self.config.get('last_output_folder', '')
     
     def set_output_folder(self, path: str) -> None:
@@ -388,11 +492,38 @@ class ConfigManager:
         try:
             normalized_path = PathManager.normalize_path(path)
             self.config['last_output_folder'] = normalized_path
+            
+            # PathRegistryにも登録
+            if self.registry:
+                self.registry.register_path(PathKeys.CPL_OUTPUT_FOLDER, normalized_path)
+                
             self.save_config()
             self.logger.info(f"出力フォルダを更新: {normalized_path}")
         except Exception as e:
             self.logger.error(f"出力フォルダ設定エラー: {e}")
             raise
+    
+    def get_temp_dir(self) -> str:
+        """
+        一時ディレクトリのパスを取得
+        
+        Returns:
+            str: 一時ディレクトリのパス
+        """
+        # PathRegistryからの取得を試みる
+        if self.registry:
+            temp_dir = self.registry.get_path(PathKeys.CPL_TEMP_DIR)
+            if temp_dir:
+                return temp_dir
+        
+        # ユーザードキュメント下の一時ディレクトリをデフォルトとする
+        user_docs = Path.home() / "Documents" / "ProjectSuite" / "CreateProjectList" / "temp"
+        try:
+            user_docs.mkdir(parents=True, exist_ok=True)
+            return str(user_docs)
+        except Exception as e:
+            self.logger.warning(f"ユーザー一時ディレクトリ作成エラー: {e}")
+            return str(Path(tempfile.gettempdir()) / "doc_processor")
     
     def get_replacement_rules(self) -> List[Dict[str, str]]:
         """

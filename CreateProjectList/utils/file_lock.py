@@ -1,4 +1,4 @@
-# file_lock.py
+"""ファイルロック管理ユーティリティ"""
 
 import os
 import portalocker
@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from CreateProjectList.utils.log_manager import LogManager
+from CreateProjectList.utils.path_manager import PathManager
 
 class FileLock:
     """ファイルロック管理クラス（クロスプラットフォーム対応）"""
@@ -125,6 +126,23 @@ class FileLock:
         """
         normalized_path = str(Path(file_path).resolve())
         return normalized_path in self._active_locks
+    
+    def get_lock_dir(self) -> Path:
+        """
+        ロックファイル用のディレクトリを取得
+        
+        Returns:
+            Path: ロックファイル用ディレクトリ
+        """
+        try:
+            # ユーザーディレクトリのロックフォルダを使用
+            lock_dir = PathManager.get_user_directory() / "CreateProjectList" / "locks"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            return lock_dir
+        except Exception as e:
+            self.logger.error(f"ロックディレクトリの作成に失敗: {e}")
+            # フォールバック: 一時ディレクトリを使用
+            return Path(os.path.join(os.path.expanduser('~'), '.file_locks'))
     
     def __del__(self):
         """デストラクタ - すべてのロックを解放"""
