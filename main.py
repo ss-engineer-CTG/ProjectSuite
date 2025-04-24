@@ -779,6 +779,12 @@ def setup_environment() -> None:
         registry.register_path("PROJECTS_DIR", str(desktop_projects_dir))
         registry.register_path("OUTPUT_BASE_DIR", str(desktop_projects_dir))
         
+        # 追加: ProjectManagerのテンプレートディレクトリを設定
+        pm_templates_dir = str(user_docs_dir / "ProjectManager" / "data" / "templates")
+        registry.register_path("PM_TEMPLATES_DIR", pm_templates_dir)
+        # 重要: CPL_INPUT_FOLDERにも同じパスを設定（これがポイント）
+        registry.register_path("CPL_INPUT_FOLDER", pm_templates_dir)
+        
         # 初回起動かどうかの確認
         is_first_run = registry.check_first_run()
         

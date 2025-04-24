@@ -92,9 +92,6 @@ logger = logging.getLogger(__name__)
 def adapt_create_project_list_config():
     """
     CreateProjectListの設定をPathRegistryと連携
-    
-    Returns:
-        PathRegistry: PathRegistryのインスタンス
     """
     try:
         registry = PathRegistry.get_instance()
@@ -130,15 +127,21 @@ def adapt_create_project_list_config():
         templates_dir = registry.get_path(PathKeys.PM_TEMPLATES_DIR) 
         projects_dir = registry.get_path(PathKeys.PM_PROJECTS_DIR)
         
+        # 追加: ProjectManagerのテンプレートディレクトリを入力フォルダとして設定
+        if templates_dir:
+            registry.register_path(PathKeys.CPL_INPUT_FOLDER, templates_dir)
+            logger.info(f"入力フォルダをProjectManagerのテンプレートディレクトリに設定: {templates_dir}")
+        else:
+            # ProjectManagerのテンプレートディレクトリが未設定の場合は明示的に設定
+            pm_templates_dir = os.path.join(user_docs, "ProjectManager", "data", "templates")
+            registry.register_path(PathKeys.PM_TEMPLATES_DIR, pm_templates_dir)
+            registry.register_path(PathKeys.CPL_INPUT_FOLDER, pm_templates_dir)
+            logger.info(f"入力フォルダを明示的に設定: {pm_templates_dir}")
+        
         # ConfigManagerモンキーパッチを適用
         _apply_config_manager_patch()
         
         return registry
-        
-    except Exception as e:
-        logger.error(f"CreateProjectList設定アダプターエラー: {e}")
-        logger.error(traceback.format_exc())
-        return None
 
 def _apply_config_manager_patch():
     """ConfigManager クラスにモンキーパッチを適用"""

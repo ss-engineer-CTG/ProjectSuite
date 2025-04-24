@@ -53,6 +53,37 @@ class DocumentProcessor:
         self._initialize_config()
         self._initialize_database()
         self._initialize_temp_dir()
+        
+        # 追加: 入力/出力フォルダを強制設定し、設定ファイルに保存
+        try:
+            if self.registry:
+                paths_updated = False
+                
+                # 入力フォルダの強制設定
+                pm_templates_dir = self.registry.get_path("PM_TEMPLATES_DIR")
+                if pm_templates_dir:
+                    self.last_input_folder = pm_templates_dir
+                    self.logger.info(f"入力フォルダを強制的に設定: {pm_templates_dir}")
+                    paths_updated = True
+                
+                # 出力フォルダの強制設定
+                pm_projects_dir = self.registry.get_path("OUTPUT_BASE_DIR")
+                if pm_projects_dir:
+                    self.last_output_folder = pm_projects_dir
+                    self.logger.info(f"出力フォルダを強制的に設定: {pm_projects_dir}")
+                    paths_updated = True
+                
+                # 重要: 設定ファイルに明示的に保存（これが新しい部分）
+                if paths_updated and self._config_manager:
+                    # 設定ファイルの値を直接更新
+                    self._config_manager.config['last_input_folder'] = pm_templates_dir
+                    self._config_manager.config['last_output_folder'] = pm_projects_dir
+                    
+                    # 変更をファイルに書き込み
+                    self._config_manager.save_config()
+                    self.logger.info("設定ファイルにパス情報を保存しました")
+        except Exception as e:
+            self.logger.warning(f"フォルダパスの強制設定に失敗: {e}")
 
     def _initialize_config(self) -> None:
         """設定の初期化"""
