@@ -104,6 +104,7 @@ class QuickProjectForm(BaseProjectForm):
             command=self.save,
             font=self.default_font,
             fg_color=self.colors.BUTTON_PRIMARY,
+            text_color=self.colors.BUTTON_TEXT,
             hover_color=self.colors.BUTTON_HOVER
         )
         save_button.pack(side="right", padx=5)

@@ -99,8 +99,10 @@ class DashboardGUI:
         window_height = int(screen_height * 0.8)
         
         # ウィンドウを中央に配置
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
+        # x = (screen_width - window_width) // 2
+        # y = (screen_height - window_height) // 2
+        x = 0
+        y = 0
         self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
         # メインフレーム
