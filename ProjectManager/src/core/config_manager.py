@@ -58,10 +58,6 @@ class ConfigManager:
         
         # 設定の読み込み
         self.config = self._load_config()
-        
-        # レガシー設定の移行確認
-        if not self.config_file.exists() or 'defaults' not in self.config:
-            self._migrate_legacy_settings()
     
     def _load_config(self) -> Dict[str, Any]:
         """
@@ -117,55 +113,6 @@ class ConfigManager:
                 'last_updated': datetime.now().isoformat()
             }
         }
-    
-    def _migrate_legacy_settings(self) -> None:
-        """レガシー設定ファイルからの移行"""
-        # レガシー設定ファイルのパス
-        legacy_paths = [
-            Path.home() / "Documents" / "ProjectSuite" / "defaults.txt",
-            Path(__file__).parent.parent.parent.parent / "defaults.txt"
-        ]
-        
-        legacy_settings = {}
-        
-        # レガシー設定の読み込み
-        for path in legacy_paths:
-            if path.exists():
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                try:
-                                    key, value = [x.strip() for x in line.split('=', 1)]
-                                    legacy_settings[key] = value
-                                except ValueError:
-                                    continue
-                except Exception as e:
-                    self.logger.error(f"レガシー設定読み込みエラー {path}: {e}")
-        
-        if not legacy_settings:
-            return
-            
-        self.logger.info(f"レガシー設定をJSON形式に移行します: {len(legacy_settings)}項目")
-        
-        # 設定の変換
-        for key, value in legacy_settings.items():
-            if key.startswith('default_'):
-                # デフォルト設定
-                target_key = key.replace('default_', '')
-                if 'defaults' not in self.config:
-                    self.config['defaults'] = {}
-                self.config['defaults'][target_key] = value
-            elif key == 'custom_projects_dir':
-                # 出力ベースディレクトリ
-                if 'paths' not in self.config:
-                    self.config['paths'] = {}
-                self.config['paths']['output_base_dir'] = value
-        
-        # 設定の保存
-        self.save_config()
-        self.logger.info("レガシー設定の移行が完了しました")
     
     def save_config(self) -> None:
         """設定ファイルの保存"""

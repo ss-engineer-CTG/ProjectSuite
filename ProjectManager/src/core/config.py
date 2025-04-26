@@ -27,20 +27,6 @@ class Config:
     # プロジェクトルートパスを定義（柔軟に対応）
     PROJECT_ROOT = ROOT_DIR
     
-    # デフォルト値設定ファイルのパス（検索順）
-    # 1. ユーザードキュメントフォルダ内
-    # 2. アプリケーションディレクトリ直下
-    # 3. dataフォルダ内
-    # 4. configフォルダ内
-    # 5. ユーザーホームディレクトリ
-    DEFAULT_VALUE_PATHS = [
-        USER_DOC_DIR / 'defaults.txt',
-        ROOT_DIR / 'defaults.txt',
-        ROOT_DIR / 'data' / 'defaults.txt',
-        ROOT_DIR / 'config' / 'defaults.txt',
-        Path.home() / 'ProjectManager/defaults.txt'
-    ]
-    
     # マスターディレクトリ
     MASTER_DIR = USER_DOC_DIR / "ProjectManager" / "data" / 'master'
     
@@ -175,51 +161,24 @@ class Config:
             設定値（存在しない場合はデフォルト値）
         """
         try:
-            # まずJSON設定から取得を試みる
-            registry = PathRegistry.get_instance()
-            config = registry.get_config()
-            
-            if config and 'defaults' in config and key in config['defaults']:
-                return config['defaults'][key]
-            
-            # 次に旧設定ファイルから取得を試みる
-            legacy_settings = cls.load_settings()
-            if key in legacy_settings:
-                return legacy_settings[key]
+            # ConfigManager経由で設定を取得
+            try:
+                from ProjectManager.src.core.config_manager import ConfigManager
+                config_manager = ConfigManager()
+                config = config_manager.get_config()
                 
+                # プレフィックスを削除して検索
+                plain_key = key.replace('default_', '')
+                
+                if config and 'defaults' in config and plain_key in config['defaults']:
+                    return config['defaults'][plain_key]
+            except Exception as e:
+                logging.warning(f"ConfigManager経由の設定取得に失敗: {e}")
+                    
             return default
         except Exception as e:
             logging.warning(f"設定の読み込みに失敗しました: {e}")
             return default
-    
-    @classmethod
-    def load_settings(cls) -> Dict[str, str]:
-        """初期値設定ファイルから設定を読み込む（後方互換性）"""
-        settings = {}
-        
-        for path in cls.DEFAULT_VALUE_PATHS:
-            if path.exists():
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        
-                        # ファイルの内容を行ごとに処理
-                        for line in content.splitlines():
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                try:
-                                    key, value = [x.strip() for x in line.split('=', 1)]
-                                    settings[key] = value
-                                except ValueError:
-                                    logging.warning(f"Invalid setting line: {line}")
-                    
-                    break
-                    
-                except Exception as e:
-                    logging.error(f"設定ファイル読み込みエラー {path}: {e}")
-                    continue
-        
-        return settings
 
     @classmethod
     def validate_environment(cls):

@@ -135,25 +135,34 @@ class BaseProjectForm:
     def load_default_values(self):
         """デフォルト値の読み込み"""
         try:
-            default_values = {
-                'project_name': Config.get_setting('default_project_name', ''),
-                'manager': Config.get_setting('default_manager', ''),
-                'reviewer': Config.get_setting('default_reviewer', ''),
-                'approver': Config.get_setting('default_approver', ''),
-                'division': Config.get_setting('default_division', ''),
-                'factory': Config.get_setting('default_factory', ''),
-                'process': Config.get_setting('default_process', ''),
-                'line': Config.get_setting('default_line', '')
-            }
+            # ConfigManagerを直接使用して設定を取得
+            from ProjectManager.src.core.config_manager import ConfigManager
+            config_manager = ConfigManager()
+            config = config_manager.get_config()
             
-            for field_name, value in default_values.items():
-                if field_name in self.fields and value:
-                    widget = self.fields[field_name]
-                    if isinstance(widget, ctk.CTkEntry):
-                        widget.delete(0, 'end')
-                        widget.insert(0, value)
-                    elif isinstance(widget, ctk.CTkComboBox):
-                        widget.set(value)
+            # デフォルト値を取得
+            default_values = {}
+            if config and 'defaults' in config:
+                default_values = {
+                    'project_name': config['defaults'].get('project_name', ''),
+                    'manager': config['defaults'].get('manager', ''),
+                    'reviewer': config['defaults'].get('reviewer', ''),
+                    'approver': config['defaults'].get('approver', ''),
+                    'division': config['defaults'].get('division', ''),
+                    'factory': config['defaults'].get('factory', ''),
+                    'process': config['defaults'].get('process', ''),
+                    'line': config['defaults'].get('line', '')
+                }
+                
+                # ウィジェットに値を設定
+                for field_name, value in default_values.items():
+                    if field_name in self.fields and value:
+                        widget = self.fields[field_name]
+                        if isinstance(widget, ctk.CTkEntry):
+                            widget.delete(0, 'end')
+                            widget.insert(0, value)
+                        elif isinstance(widget, ctk.CTkComboBox):
+                            widget.set(value)
                         
         except Exception as e:
             logging.warning(f"デフォルト値の読み込みエラー: {e}")
