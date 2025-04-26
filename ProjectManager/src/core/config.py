@@ -63,18 +63,12 @@ class Config:
             Path: 出力先ベースディレクトリのパス
         """
         try:
-            from PathRegistry import PathRegistry
+            # PathRegistryからOUTPUT_BASE_DIRを直接取得
+            # エイリアス処理はPathRegistry内部で実行されるため、PROJECTS_DIRの確認は不要
             registry = PathRegistry.get_instance()
-            
-            # OUTPUT_BASE_DIR を優先的に検索
             output_dir = registry.get_path("OUTPUT_BASE_DIR")
             if output_dir:
                 return Path(output_dir)
-            
-            # 後方互換性のためにPROJECTS_DIRもチェック
-            projects_dir = registry.get_path("PROJECTS_DIR")
-            if projects_dir:
-                return Path(projects_dir)
             
             # カスタムパスが設定されていない場合はデフォルトパスを返す
             # デスクトップのprojectsフォルダを返すように変更
@@ -143,7 +137,6 @@ class Config:
         registry.register_path("DASHBOARD_EXPORT_FILE", str(cls.DASHBOARD_EXPORT_FILE))
         registry.register_path("PROJECTS_EXPORT_FILE", str(cls.PROJECTS_EXPORT_FILE))
         registry.register_path("DB_PATH", str(cls.DB_PATH))
-        registry.register_path("LOG_FILE", str(cls.LOG_FILE))
         
         # 環境変数にも登録
         os.environ["PMSUITE_DASHBOARD_FILE"] = str(cls.DASHBOARD_EXPORT_FILE)

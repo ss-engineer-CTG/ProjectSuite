@@ -107,6 +107,7 @@ def adapt_project_manager_config():
             os.environ["PMSUITE_DASHBOARD_FILE"] = str(Config.DASHBOARD_EXPORT_FILE)
             os.environ["PMSUITE_DASHBOARD_DATA_DIR"] = str(Config.DASHBOARD_EXPORT_DIR)
             os.environ["PMSUITE_DB_PATH"] = str(Config.DB_PATH)
+            os.environ["PMSUITE_OUTPUT_DIR"] = str(Config.OUTPUT_BASE_DIR)
         
         # セットアップ関数を置き換え
         Config.setup_directories = patched_setup_directories

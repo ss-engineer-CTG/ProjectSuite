@@ -83,7 +83,7 @@ except ImportError:
         CPL_OUTPUT_FOLDER = "CPL_OUTPUT_FOLDER"
         PM_DB_PATH = "DB_PATH"
         PM_TEMPLATES_DIR = "TEMPLATES_DIR"
-        PM_PROJECTS_DIR = "PROJECTS_DIR"
+        OUTPUT_BASE_DIR = "OUTPUT_BASE_DIR"
         LOGS_DIR = "LOGS_DIR"
 
 # ロガー
@@ -125,7 +125,7 @@ def adapt_create_project_list_config():
         # 必要なパスをProjectManagerから取得
         db_path = registry.get_path(PathKeys.PM_DB_PATH)
         templates_dir = registry.get_path(PathKeys.PM_TEMPLATES_DIR) 
-        projects_dir = registry.get_path(PathKeys.PM_PROJECTS_DIR)
+        output_dir = registry.get_path(PathKeys.OUTPUT_BASE_DIR)
         
         # 追加: ProjectManagerのテンプレートディレクトリを入力フォルダとして設定
         if templates_dir:
@@ -137,6 +137,11 @@ def adapt_create_project_list_config():
             registry.register_path(PathKeys.PM_TEMPLATES_DIR, pm_templates_dir)
             registry.register_path(PathKeys.CPL_INPUT_FOLDER, pm_templates_dir)
             logger.info(f"入力フォルダを明示的に設定: {pm_templates_dir}")
+            
+        # 出力フォルダの設定確認
+        if output_dir:
+            registry.register_path(PathKeys.CPL_OUTPUT_FOLDER, output_dir)
+            logger.info(f"出力フォルダをOUTPUT_BASE_DIRから設定: {output_dir}")
         
         # ConfigManagerモンキーパッチを適用
         _apply_config_manager_patch()
@@ -167,16 +172,17 @@ def _apply_config_manager_patch():
                         self.logger.info(f"PathRegistryからDBパスを取得: {db_path}")
                     
                     # テンプレートディレクトリをレジストリから取得
-                    template_dir = self.registry.get_path(PathKeys.PM_TEMPLATES_DIR
+                    template_dir = self.registry.get_path(PathKeys.PM_TEMPLATES_DIR)
                     if template_dir and not self.config.get('last_input_folder'):
                         self.config['last_input_folder'] = template_dir
                         self.logger.info(f"PathRegistryからテンプレートディレクトリを取得: {template_dir}")
                     
                     # プロジェクトディレクトリをレジストリから取得
-                    projects_dir = self.registry.get_path(PathKeys.PM_PROJECTS_DIR)
-                    if projects_dir and not self.config.get('last_output_folder'):
-                        self.config['last_output_folder'] = projects_dir
-                        self.logger.info(f"PathRegistryからプロジェクトディレクトリを取得: {projects_dir}")
+                    # 直接OUTPUT_BASE_DIRから取得するように変更
+                    output_dir = self.registry.get_path(PathKeys.OUTPUT_BASE_DIR)
+                    if output_dir and not self.config.get('last_output_folder'):
+                        self.config['last_output_folder'] = output_dir
+                        self.logger.info(f"PathRegistryから出力ディレクトリを取得: {output_dir}")
                     
                     # 一時ディレクトリをレジストリから取得
                     temp_dir = self.registry.get_path(PathKeys.CPL_TEMP_DIR)
@@ -230,10 +236,14 @@ def _ensure_default_config():
                     import json
                     from datetime import datetime
                     
+                    # レジストリからパスを取得
+                    registry = PathRegistry.get_instance()
+                    output_dir = registry.get_path(PathKeys.OUTPUT_BASE_DIR, "")
+                    
                     default_config_data = {
                         "db_path": "",
                         "last_input_folder": "",
-                        "last_output_folder": "",
+                        "last_output_folder": output_dir,  # OUTPUT_BASE_DIRから取得
                         "replacement_rules": [
                             {"search": "#案件名#", "replace": "project_name"},
                             {"search": "#作成日#", "replace": "start_date"},

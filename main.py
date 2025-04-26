@@ -775,14 +775,14 @@ def setup_environment() -> None:
         registry.register_path("USER_DATA_DIR", str(user_docs_dir))
         
         # デスクトップのプロジェクトディレクトリを登録
+        # OUTPUT_BASE_DIRを一度登録すると、エイリアスも自動更新される
         desktop_projects_dir = Path.home() / "Desktop" / "projects"
-        registry.register_path("PROJECTS_DIR", str(desktop_projects_dir))
         registry.register_path("OUTPUT_BASE_DIR", str(desktop_projects_dir))
         
         # 追加: ProjectManagerのテンプレートディレクトリを設定
         pm_templates_dir = str(user_docs_dir / "ProjectManager" / "data" / "templates")
         registry.register_path("PM_TEMPLATES_DIR", pm_templates_dir)
-        # 重要: CPL_INPUT_FOLDERにも同じパスを設定（これがポイント）
+        # CPL_INPUT_FOLDERにも同じパスを設定
         registry.register_path("CPL_INPUT_FOLDER", pm_templates_dir)
         
         # 初回起動かどうかの確認
@@ -801,7 +801,7 @@ def setup_environment() -> None:
             # JSON形式への設定移行確認（初回以外でも実行）
             registry.migrate_legacy_config()
             
-            # 必要なディレクトリだけ作成（データのコピーはなし）（修正点）
+            # 必要なディレクトリだけ作成（データのコピーはなし）
             user_docs_dir.mkdir(parents=True, exist_ok=True)
             data_dir = user_docs_dir / "ProjectManager" / "data"
             data_dir.mkdir(parents=True, exist_ok=True)
@@ -809,7 +809,6 @@ def setup_environment() -> None:
             
             logging.info("既存のユーザーデータディレクトリを使用します。")
             
-            # 新しいOUTPUT_BASE_DIRへの移行対応
             # データベース内のパス参照を更新
             update_database_paths()
         

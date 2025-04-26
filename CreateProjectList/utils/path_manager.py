@@ -1,23 +1,21 @@
 """パス管理ユーティリティ"""
 
-from pathlib import Path
 import os
-from typing import Optional
+import re
 import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Union, Any
 from CreateProjectList.utils.log_manager import LogManager
 
 class PathManager:
-    """パス管理クラス"""
+    """パス管理ユーティリティクラス"""
     
     logger = LogManager().get_logger(__name__)
     
     @staticmethod
-    def normalize_path(path: str) -> str:
+    def normalize_path(path: Union[str, Path]) -> str:
         """
-        パスを正規化
-        - 相対パスを絶対パスに変換
-        - パスセパレータを統一
-        - 余分なセパレータを除去
+        パスを正規化する
         
         Args:
             path: 正規化するパス
@@ -25,64 +23,57 @@ class PathManager:
         Returns:
             str: 正規化されたパス
         """
-        if not path:
-            return ""
-        
-        # PathRegistryを使用してパスを正規化
         try:
-            from PathRegistry import PathRegistry
-            registry = PathRegistry.get_instance()
-            
-            # レジストリからのパス解決を試みる
-            for key, registered_path in registry.get_all_paths().items():
-                if str(registered_path) == str(path):
-                    resolved_path = registry.get_path(key)
-                    if resolved_path:
-                        return str(resolved_path)
-                        
-            # キーではなくパス文字列が直接一致する場合
-            registry_paths = registry.get_all_paths()
-            if path in registry_paths:
-                return registry_paths[path]
+            if not path:
+                return ""
                 
-        except ImportError:
-            PathManager.logger.debug("PathRegistryが使用できません。基本的なパス正規化を使用します。")
-        except Exception as e:
-            PathManager.logger.warning(f"レジストリによるパス解決エラー: {e}")
-            
-        try:
+            # Pathオブジェクトに変換して正規化
             normalized = str(Path(path).resolve())
             return normalized
+            
         except Exception as e:
-            PathManager.logger.warning(f"パス正規化エラー: {e}")
-            return path
+            PathManager.logger.error(f"パス正規化エラー: {e}")
+            return str(path)
     
     @staticmethod
-    def is_valid_path(path: str) -> bool:
+    def is_valid_path(path: Union[str, Path]) -> bool:
         """
-        パスの妥当性チェック
+        パスが有効かどうかチェック
         
         Args:
             path: チェックするパス
             
         Returns:
-            bool: パスが有効な場合True
+            bool: 有効な場合True
         """
-        if not path:
-            return False
-            
         try:
-            path_obj = Path(path)
-            # 絶対パスであることを確認
-            return path_obj.is_absolute()
+            if not path:
+                return False
+                
+            # 絶対パスに変換
+            abs_path = Path(path).resolve()
+            
+            # 基本的な妥当性チェック
+            # 1. パスの長さをチェック（Windowsの上限は260文字）
+            if len(str(abs_path)) > 260:
+                return False
+                
+            # 2. パスに無効な文字が含まれていないか
+            # Windowsでの無効な文字: < > : " / \ | ? *
+            if re.search(r'[<>:"/\\|?*]', str(abs_path.name)):
+                return False
+            
+            # すべてのチェックを通過
+            return True
+            
         except Exception as e:
-            PathManager.logger.warning(f"パス検証エラー: {e}")
+            PathManager.logger.error(f"パス検証エラー: {e}")
             return False
     
     @staticmethod
-    def ensure_directory(path: str) -> bool:
+    def ensure_directory(path: Union[str, Path]) -> bool:
         """
-        ディレクトリの存在確認と作成
+        ディレクトリが存在することを確認し、必要なら作成
         
         Args:
             path: 確認/作成するディレクトリパス
@@ -90,135 +81,121 @@ class PathManager:
         Returns:
             bool: 成功時True
         """
-        if not path:
-            return False
-            
         try:
-            dir_path = Path(path)
-            if not dir_path.exists():
-                dir_path.mkdir(parents=True, exist_ok=True)
-                PathManager.logger.info(f"ディレクトリを作成: {dir_path}")
-            elif not dir_path.is_dir():
-                PathManager.logger.warning(f"{path} はディレクトリではありません")
+            if not path:
                 return False
+                
+            directory = Path(path)
+            directory.mkdir(parents=True, exist_ok=True)
             return True
+            
         except Exception as e:
             PathManager.logger.error(f"ディレクトリ作成エラー: {e}")
             return False
     
     @staticmethod
-    def get_relative_path(path: str, base_path: str) -> str:
+    def get_user_directory() -> Path:
+        """
+        ユーザーディレクトリのパスを取得
+        
+        Returns:
+            Path: ユーザードキュメントディレクトリのパス
+        """
+        try:
+            # PathRegistryを使用して取得を試みる
+            try:
+                from PathRegistry import PathRegistry
+                registry = PathRegistry.get_instance()
+                user_data_dir = registry.get_path("USER_DATA_DIR")
+                if user_data_dir:
+                    return Path(user_data_dir)
+            except (ImportError, Exception):
+                pass
+                
+            # デフォルト値
+            return Path.home() / "Documents" / "ProjectSuite"
+            
+        except Exception as e:
+            PathManager.logger.error(f"ユーザーディレクトリ取得エラー: {e}")
+            return Path.home() / "Documents" / "ProjectSuite"
+    
+    @staticmethod
+    def get_relative_path(path: Union[str, Path], base: Union[str, Path]) -> Optional[Path]:
         """
         ベースパスからの相対パスを取得
         
         Args:
             path: 対象パス
-            base_path: ベースパス
+            base: ベースパス
             
         Returns:
-            str: 相対パス
-        """
-        if not path or not base_path:
-            return path
-            
-        try:
-            return str(Path(path).relative_to(base_path))
-        except ValueError:
-            return path
-    
-    @staticmethod
-    def join_paths(*paths: str) -> str:
-        """
-        パスの結合
-        
-        Args:
-            *paths: 結合するパスの可変長引数
-            
-        Returns:
-            str: 結合されたパス
-        """
-        if not paths:
-            return ""
-            
-        return str(Path(*paths))
-    
-    @staticmethod
-    def get_file_extension(path: str) -> str:
-        """
-        ファイル拡張子を取得
-        
-        Args:
-            path: ファイルパス
-            
-        Returns:
-            str: 拡張子（ドット付き、小文字）
-        """
-        if not path:
-            return ""
-            
-        return Path(path).suffix.lower()
-    
-    @staticmethod
-    def change_extension(path: str, new_ext: str) -> str:
-        """
-        ファイル拡張子を変更
-        
-        Args:
-            path: ファイルパス
-            new_ext: 新しい拡張子（ドットの有無は任意）
-            
-        Returns:
-            str: 拡張子が変更されたパス
-        """
-        if not path:
-            return ""
-            
-        if not new_ext.startswith('.'):
-            new_ext = '.' + new_ext
-        return str(Path(path).with_suffix(new_ext))
-    
-    @staticmethod
-    def sanitize_path(path_component: str) -> str:
-        """
-        パスコンポーネントから不正な文字を除去
-        
-        Args:
-            path_component: パスの構成要素（フォルダ名やファイル名）
-            
-        Returns:
-            str: サニタイズされたパスコンポーネント
-        """
-        # Windowsで使用できない文字を置換
-        invalid_chars = '<>:"/\\|?*'
-        result = path_component
-        for char in invalid_chars:
-            result = result.replace(char, '_')
-        
-        # 先頭や末尾のスペースやピリオドを除去
-        result = result.strip(' .')
-        
-        # 空の場合はデフォルト名を使用
-        if not result:
-            result = "unnamed"
-            
-        return result
-        
-    @staticmethod
-    def get_user_directory() -> Path:
-        """
-        アプリケーション用のユーザードキュメントディレクトリを取得
-        
-        Returns:
-            Path: ユーザードキュメントディレクトリ
+            Optional[Path]: 相対パス、取得できない場合はNone
         """
         try:
-            from PathRegistry import PathRegistry
-            registry = PathRegistry.get_instance()
-            user_dir = registry.get_path("USER_DATA_DIR")
-            if user_dir:
-                return Path(user_dir)
-        except Exception:
-            pass
+            path_obj = Path(path).resolve()
+            base_obj = Path(base).resolve()
             
-        # デフォルトのユーザードキュメントディレクトリ
-        return Path.home() / "Documents" / "ProjectSuite"
+            # 相対パスを計算
+            try:
+                return path_obj.relative_to(base_obj)
+            except ValueError:
+                # 共通の親ディレクトリがない場合
+                return None
+                
+        except Exception as e:
+            PathManager.logger.error(f"相対パス計算エラー: {e}")
+            return None
+    
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """
+        ファイル名を安全な形式に変換
+        
+        Args:
+            filename: 元のファイル名
+            
+        Returns:
+            str: 安全なファイル名
+        """
+        try:
+            # 無効な文字を置換
+            safe_name = re.sub(r'[<>:"/\\|?*]', '_', filename)
+            
+            # 長すぎる場合は切り詰め
+            if len(safe_name) > 255:
+                base, ext = os.path.splitext(safe_name)
+                base = base[:255 - len(ext) - 1]
+                safe_name = base + ext
+                
+            return safe_name
+            
+        except Exception as e:
+            PathManager.logger.error(f"ファイル名サニタイズエラー: {e}")
+            return filename
+
+    @staticmethod
+    def get_output_base_dir() -> Path:
+        """
+        出力ベースディレクトリを取得
+        
+        注: PathRegistryからOUTPUT_BASE_DIRを取得
+        
+        Returns:
+            Path: 出力ベースディレクトリ
+        """
+        try:
+            # PathRegistryからOUTPUT_BASE_DIRを取得
+            try:
+                from PathRegistry import PathRegistry
+                registry = PathRegistry.get_instance()
+                output_dir = registry.get_path("OUTPUT_BASE_DIR")
+                if output_dir:
+                    return Path(output_dir)
+            except (ImportError, Exception) as e:
+                PathManager.logger.warning(f"PathRegistry経由の出力パス取得エラー: {e}")
+            
+            # デフォルト値
+            return Path.home() / "Desktop" / "projects"
+        except Exception as e:
+            PathManager.logger.error(f"出力ディレクトリ取得エラー: {e}")
+            return Path.home() / "Desktop" / "projects"

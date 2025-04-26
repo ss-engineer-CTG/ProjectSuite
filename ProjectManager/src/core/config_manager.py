@@ -93,7 +93,7 @@ class ConfigManager:
         
         return {
             'paths': {
-                'output_base_dir': str(user_doc_dir / "ProjectManager" / "data" / "projects"),
+                'output_base_dir': str(Path.home() / "Desktop" / "projects"),
                 'user_data_dir': str(user_doc_dir),
                 'logs_dir': str(user_doc_dir / "logs"),
                 'master_dir': str(user_doc_dir / "ProjectManager" / "data" / "master"),
@@ -246,8 +246,6 @@ class ConfigManager:
                 # output_base_dirの場合はOUTPUT_BASE_DIRとして登録
                 if key == 'output_base_dir':
                     self.registry.register_path("OUTPUT_BASE_DIR", value)
-                    # 後方互換性のためPROJECTS_DIRとしても登録
-                    self.registry.register_path("PROJECTS_DIR", value)
                 else:
                     self.registry.register_path(normalized_key, value)
         
@@ -263,10 +261,8 @@ class ConfigManager:
         # 設定更新
         self.set_setting('paths', 'output_base_dir', output_dir)
         
-        # PathRegistryにも反映
+        # PathRegistryにも反映（エイリアスの更新はPathRegistry内部で処理）
         if self.registry:
             self.registry.register_path("OUTPUT_BASE_DIR", output_dir)
-            # 後方互換性のためPROJECTS_DIRとしても登録
-            self.registry.register_path("PROJECTS_DIR", output_dir)
             
         self.logger.info(f"出力ディレクトリを更新しました: {output_dir}")

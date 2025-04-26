@@ -1,22 +1,17 @@
-"""
-パス管理のための統一インターフェース
-アプリケーション全体でパスを一元管理し、
-環境依存のパス問題を解決する
-"""
+"""共通パスレジストリモジュール"""
 
 import os
-import sys
-import logging
 import json
+import logging
+import sys
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple, Set, Any, Union
+from typing import Dict, Any, Optional, List, Set, Tuple
 from datetime import datetime
 
 class PathRegistry:
-    """パス管理クラス（シングルトン）"""
+    """パス管理の中央レジストリ"""
     
     _instance = None
-    _initialized = False
     
     def __new__(cls):
         """シングルトンパターンの実装"""
@@ -27,733 +22,284 @@ class PathRegistry:
     
     @classmethod
     def get_instance(cls):
-        """シングルトンインスタンスの取得"""
+        """
+        シングルトンインスタンスを取得
+        
+        Returns:
+            PathRegistry: インスタンス
+        """
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
     
     def __init__(self):
-        """初期化（シングルトンなので1回のみ実行）"""
-        if self._initialized:
+        """初期化（シングルトンなので一度だけ実行）"""
+        if getattr(self, '_initialized', False):
             return
             
         self._initialized = True
-        self._paths = {}
-        self._user_paths = set()  # ユーザーが明示的に設定したパス
-        self._app_base_path = self._get_app_base_path()
-        self._config = None  # 遅延ロード用
-        self._settings_cache = {}  # 設定キャッシュ
-        
-        # デフォルトのパス登録
-        self._register_default_paths()
-        
-        # ロガーの初期化
         self.logger = logging.getLogger(__name__)
+        
+        # パス格納用の辞書
+        self._paths = {}
+        
+        # エイリアス定義 - キー：エイリアス名、値：参照先キー
+        self._path_aliases = {
+            "PROJECTS_DIR": "OUTPUT_BASE_DIR",  # PROJECTS_DIRはOUTPUT_BASE_DIRのエイリアス
+            "PM_PROJECTS_DIR": "OUTPUT_BASE_DIR"  # 後方互換性用
+        }
+        
+        # 設定ファイルのパス
+        self._config_file = self._get_config_file_path()
+        
+        # 設定の読み込み
+        self._load_paths()
+        
+        self.logger.debug("PathRegistry initialized")
     
-    def _get_app_base_path(self) -> str:
+    def _get_config_file_path(self) -> Path:
         """
-        アプリケーションの基本パスを取得
+        設定ファイルのパスを取得
         
         Returns:
-            str: アプリケーションのルートディレクトリ
+            Path: 設定ファイルのパス
         """
-        if getattr(sys, 'frozen', False):
-            # PyInstallerで実行ファイル化した場合
-            return os.path.dirname(sys.executable)
-        else:
-            # 通常の実行の場合
-            current_file = os.path.abspath(__file__)
-            return os.path.dirname(current_file)
+        # ユーザードキュメント内の設定ファイル
+        user_docs = Path.home() / "Documents" / "ProjectSuite"
+        config_file = user_docs / "path_registry.json"
+        
+        return config_file
     
-    def _register_default_paths(self) -> None:
-        """デフォルトのパスを登録"""
-        # アプリケーションルートパス
-        self.register_path("ROOT", self._app_base_path)
-        
-        # ユーザーデータディレクトリ
-        user_doc_dir = os.path.join(os.path.expanduser("~"), "Documents", "ProjectSuite")
-        self.register_path("USER_DATA_DIR", user_doc_dir)
-        
-        # ログディレクトリ
-        self.register_path("LOGS_DIR", os.path.join(user_doc_dir, "logs"))
-        
-        # データディレクトリ
-        self.register_path("DATA_DIR", user_doc_dir)
-        
-        # エクスポートディレクトリ
-        self.register_path("EXPORTS_DIR", os.path.join(user_doc_dir, "ProjectManager", "data", "exports"))
-        
-        # テンプレートディレクトリ
-        self.register_path("TEMPLATES_DIR", os.path.join(user_doc_dir, "ProjectManager", "data", "templates"))
-        
-        # デフォルトのプロジェクトディレクトリ（修正：Desktopに変更）
-        default_projects_dir = os.path.join(os.path.expanduser("~"), "Desktop", "projects")
-        self.register_path("PROJECTS_DIR", default_projects_dir)
-        self.register_path("OUTPUT_BASE_DIR", default_projects_dir)  # エイリアス
-        
-        # マスターデータディレクトリ
-        self.register_path("MASTER_DIR", os.path.join(user_doc_dir, "ProjectManager", "data", "master"))
-        
-        # ビルドとデプロイ用
-        self.register_path("TEMP_DIR", os.path.join(user_doc_dir, "temp"))
-        self.register_path("BACKUP_DIR", os.path.join(user_doc_dir, "backup"))
-        
-        # CreateProjectList用ディレクトリ
-        self.register_path("CPL_DIR", os.path.join(user_doc_dir, "CreateProjectList"))
-        self.register_path("CPL_CONFIG_DIR", os.path.join(user_doc_dir, "CreateProjectList", "config"))
-        self.register_path("CPL_TEMP_DIR", os.path.join(user_doc_dir, "CreateProjectList", "temp"))
-        self.register_path("CPL_TEMPLATES_DIR", os.path.join(user_doc_dir, "CreateProjectList", "templates"))
-        self.register_path("CPL_CACHE_DIR", os.path.join(user_doc_dir, "CreateProjectList", "cache"))
-        
-        # デフォルトのデータベースパス
-        self.register_path("DB_PATH", os.path.join(user_doc_dir, "ProjectManager", "data", "projects.db"))
+    def _load_paths(self) -> None:
+        """保存されているパス設定を読み込み"""
+        try:
+            if self._config_file.exists():
+                with open(self._config_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if 'paths' in data:
+                        self._paths = data['paths']
+                        self.logger.debug(f"Loaded {len(self._paths)} paths from {self._config_file}")
+        except Exception as e:
+            self.logger.error(f"Failed to load paths: {e}")
+    
+    def _save_paths(self) -> None:
+        """パス設定を保存"""
+        try:
+            # 保存データの準備
+            data = {
+                'paths': self._paths,
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            # ディレクトリ確保
+            self._config_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # ファイル書き込み
+            with open(self._config_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+            self.logger.debug(f"Saved {len(self._paths)} paths to {self._config_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save paths: {e}")
     
     def register_path(self, key: str, path: str) -> None:
         """
-        パスを登録
+        パスの登録・更新
         
         Args:
             key: パスのキー
             path: パスの値
         """
-        self._paths[key] = path
-        self._user_paths.add(key)  # ユーザー登録パスとして記録
+        if not key:
+            self.logger.warning("Cannot register path with empty key")
+            return
+            
+        if not path:
+            self.logger.warning(f"Cannot register empty path for key '{key}'")
+            return
         
-        # 関連ディレクトリも自動的に作成
-        if key.endswith("_DIR") or key.endswith("_FOLDER"):
-            try:
-                path_obj = Path(path)
-                path_obj.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                self.logger.warning(f"ディレクトリ作成エラー {key}: {e}")
+        # 正規化
+        normalized_path = str(Path(path).resolve())
+        
+        # キーとパスの更新
+        if key in self._paths and self._paths[key] == normalized_path:
+            # 値が変わっていない場合は何もしない
+            return
+            
+        self._paths[key] = normalized_path
+        self.logger.debug(f"Registered path '{key}': {normalized_path}")
+        
+        # エイリアス対象なら、すべてのエイリアスを更新
+        for alias_key, target_key in self._path_aliases.items():
+            if target_key == key:
+                self._paths[alias_key] = normalized_path
+                self.logger.debug(f"Updated alias '{alias_key}' to match '{key}': {normalized_path}")
+        
+        # エイリアスのキーなら実際のキーも更新
+        if key in self._path_aliases:
+            target_key = self._path_aliases[key]
+            self._paths[target_key] = normalized_path
+            self.logger.debug(f"Updated target '{target_key}' from alias '{key}': {normalized_path}")
+        
+        # 設定の保存
+        self._save_paths()
     
     def get_path(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """
-        登録されたパスを取得（拡張版）
-        
-        優先順位:
-        1. 明示的に登録されたパス
-        2. 設定ファイルからのカスタムパス
-        3. デフォルト値
+        登録されたパスを取得
         
         Args:
-            key: パスキー
-            default: デフォルト値
+            key: パスのキー
+            default: パスが見つからない場合のデフォルト値
             
         Returns:
-            Optional[str]: 解決されたパス
+            Optional[str]: パス、見つからない場合はデフォルト値
         """
-        # 1. 登録済みパスをチェック
+        # 直接キーで検索
         if key in self._paths:
             return self._paths[key]
         
-        # 2. PROJECTSキーの特別処理
-        if key == "PROJECTS_DIR" or key == "OUTPUT_BASE_DIR":
-            # 設定ファイルからカスタムパスを取得
-            custom_path = self.get_custom_projects_path()
-            if custom_path:
-                # パスを登録して今後の参照を簡素化
-                self.register_path(key, custom_path)
-                return custom_path
-        
-        # 3. エイリアスの処理
-        aliases = {
-            "PROJECTS_DIR": "OUTPUT_BASE_DIR",
-            "OUTPUT_BASE_DIR": "PROJECTS_DIR"
-        }
-        if key in aliases and aliases[key] in self._paths:
-            return self._paths[aliases[key]]
-        
-        # 4. デフォルト値を返す
+        # エイリアスの場合は参照先を検索
+        if key in self._path_aliases and self._path_aliases[key] in self._paths:
+            target_key = self._path_aliases[key]
+            value = self._paths[target_key]
+            self.logger.debug(f"Retrieved path for '{key}' via alias to '{target_key}': {value}")
+            return value
+            
+        self.logger.debug(f"Path '{key}' not found, using default: {default}")
         return default
     
-    def get_custom_projects_path(self) -> Optional[str]:
+    def get_all_paths(self) -> Dict[str, str]:
         """
-        カスタムプロジェクトパスを設定ファイルから取得
+        すべてのパスを取得
         
         Returns:
-            Optional[str]: カスタムプロジェクトパス。設定されていない場合はNone
+            Dict[str, str]: すべてのパスの辞書
         """
-        # 設定の読み込み
-        if not self._config:
-            self._config = self._load_config()
-        
-        # カスタムパスの取得
-        custom_path = self._config.get('custom_projects_dir')
-        
-        if custom_path and os.path.exists(custom_path):
-            return custom_path
-        
-        return None
+        return self._paths.copy()
     
-    def _load_config(self) -> Dict[str, str]:
+    def ensure_directory(self, key: str) -> Optional[str]:
         """
-        設定ファイルから設定を読み込む
-        
-        Returns:
-            Dict[str, str]: 設定データ
-        """
-        if self._settings_cache:
-            return self._settings_cache
-            
-        config = {}
-        
-        # 設定ファイルのパス
-        default_paths = [
-            os.path.join(os.path.expanduser("~"), "Documents", "ProjectSuite", "defaults.txt"),
-            os.path.join(self._app_base_path, "defaults.txt")
-        ]
-        
-        # 最初に見つかった設定ファイルを読み込む
-        for path in default_paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                try:
-                                    key, value = [x.strip() for x in line.split('=', 1)]
-                                    config[key] = value
-                                except ValueError:
-                                    continue
-                    self._settings_cache = config
-                    break
-                except Exception as e:
-                    self.logger.warning(f"設定ファイル読み込みエラー: {e}")
-        
-        return config
-    
-    def get_config(self) -> Dict[str, str]:
-        """
-        設定を取得
-        
-        Returns:
-            Dict[str, str]: 設定データ
-        """
-        if not self._config:
-            self._config = self._load_config()
-        
-        return self._config
-    
-    def ensure_directory(self, key: str) -> bool:
-        """
-        指定キーのディレクトリが存在することを確認し、なければ作成
+        キーに関連付けられたディレクトリが存在することを確認
         
         Args:
             key: ディレクトリのキー
             
         Returns:
-            bool: 作成成功時はTrue
+            Optional[str]: 作成されたディレクトリのパス、失敗時はNone
         """
         path = self.get_path(key)
         if not path:
-            self.logger.warning(f"ディレクトリキーが未登録: {key}")
-            return False
-            
-        path_obj = Path(path)
-        if path_obj.exists() and path_obj.is_dir():
-            return True
+            self.logger.warning(f"Directory key '{key}' not found")
+            return None
             
         try:
-            path_obj.mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"ディレクトリを作成: {path}")
-            return True
+            # ディレクトリの作成
+            directory = Path(path)
+            directory.mkdir(parents=True, exist_ok=True)
+            self.logger.debug(f"Ensured directory exists: {path}")
+            return path
+            
         except Exception as e:
-            self.logger.error(f"ディレクトリ作成エラー {path}: {e}")
+            self.logger.error(f"Failed to create directory '{path}': {e}")
+            return None
+    
+    def is_valid_path(self, key: str) -> bool:
+        """
+        パスが有効かどうかを確認
+        
+        Args:
+            key: パスのキー
+            
+        Returns:
+            bool: パスが存在し有効な場合True
+        """
+        path = self.get_path(key)
+        if not path:
             return False
-    
-    def get_all_paths(self) -> Dict[str, str]:
-        """
-        登録されている全パスを取得
-        
-        Returns:
-            Dict[str, str]: パス一覧
-        """
-        return self._paths.copy()
-    
-    def diagnose(self) -> Dict[str, Any]:
-        """
-        パス診断を実行
-        
-        Returns:
-            Dict[str, Any]: 診断結果
-        """
-        issues = []
-        
-        # 基本ディレクトリの存在チェック
-        essential_dirs = ["USER_DATA_DIR", "LOGS_DIR", "DATA_DIR", "PROJECTS_DIR"]
-        for key in essential_dirs:
-            path = self.get_path(key)
-            if not path:
-                issues.append({
-                    "type": "missing_key",
-                    "key": key,
-                    "path": None,
-                    "severity": "high",
-                    "solution": f"{key}のパスが設定されていません。アプリケーションを再初期化してください。"
-                })
-                continue
-                
-            path_obj = Path(path)
-            if not path_obj.exists():
-                issues.append({
-                    "type": "missing_dir",
-                    "key": key,
-                    "path": path,
-                    "severity": "warning",
-                    "fixable": True,
-                    "solution": f"ディレクトリ {path} が存在しません。自動修復機能で作成できます。"
-                })
-            elif not path_obj.is_dir():
-                issues.append({
-                    "type": "not_dir",
-                    "key": key,
-                    "path": path,
-                    "severity": "error",
-                    "solution": f"{path} はディレクトリではありません。別のパスを指定してください。"
-                })
-        
-        # DBファイルの確認
-        db_path = self.get_path("DB_PATH")
-        if db_path:
-            db_obj = Path(db_path)
-            if not db_obj.parent.exists():
-                issues.append({
-                    "type": "db_parent_missing",
-                    "key": "DB_PATH",
-                    "path": str(db_obj.parent),
-                    "severity": "warning",
-                    "fixable": True,
-                    "solution": f"データベースの親ディレクトリ {db_obj.parent} が存在しません。自動修復機能で作成できます。"
-                })
-        
-        # プロジェクトパスの検証
-        projects_dir = self.get_path("PROJECTS_DIR")
-        if projects_dir:
-            try:
-                projects_obj = Path(projects_dir)
-                if not projects_obj.exists():
-                    issues.append({
-                        "type": "projects_dir_missing",
-                        "key": "PROJECTS_DIR",
-                        "path": projects_dir,
-                        "severity": "warning",
-                        "fixable": True,
-                        "solution": f"プロジェクトディレクトリ {projects_dir} が存在しません。自動修復機能で作成できます。"
-                    })
-                else:
-                    # 書き込み権限の確認
-                    test_file = projects_obj / ".write_test"
-                    try:
-                        test_file.touch()
-                        test_file.unlink()
-                    except (PermissionError, OSError):
-                        issues.append({
-                            "type": "permission_error",
-                            "key": "PROJECTS_DIR",
-                            "path": projects_dir,
-                            "severity": "error",
-                            "solution": f"プロジェクトディレクトリ {projects_dir} への書き込み権限がありません。"
-                        })
-            except Exception as e:
-                issues.append({
-                    "type": "validation_error",
-                    "key": "PROJECTS_DIR",
-                    "path": projects_dir,
-                    "error": str(e),
-                    "severity": "error",
-                    "solution": f"プロジェクトディレクトリの検証に失敗しました: {e}"
-                })
-        
-        # 診断結果の返却
-        return {
-            "issues": issues,
-            "total_issues": len(issues),
-            "error_count": sum(1 for i in issues if i["severity"] == "error"),
-            "warning_count": sum(1 for i in issues if i["severity"] == "warning")
-        }
-
-    def migrate_legacy_config(self) -> Dict[str, Any]:
-        """
-        レガシー設定を新しい形式に移行
-        
-        Returns:
-            Dict[str, Any]: 移行結果情報
-        """
-        try:
-            results = {
-                'migrated_paths': [],
-                'failed_paths': [],
-                'created_dirs': []
-            }
             
-            # レガシーパス設定ファイルの検索
-            legacy_paths = [
-                os.path.join(os.path.expanduser("~"), ".projectsuite_paths.txt"),
-                os.path.join(self._app_base_path, "paths.config"),
-                os.path.join(os.path.expanduser("~"), "Documents", "ProjectManager", "config.txt")
-            ]
-            
-            for path in legacy_paths:
-                if os.path.exists(path):
-                    try:
-                        # レガシー設定ファイルの読み込み
-                        with open(path, 'r', encoding='utf-8') as f:
-                            for line in f:
-                                line = line.strip()
-                                if line and not line.startswith('#'):
-                                    try:
-                                        key, value = [x.strip() for x in line.split('=', 1)]
-                                        # キーの標準化（例: project_dir → PROJECTS_DIR）
-                                        normalized_key = self._normalize_legacy_key(key)
-                                        if normalized_key:
-                                            self.register_path(normalized_key, value)
-                                            results['migrated_paths'].append(f"{key} → {normalized_key}: {value}")
-                                    except ValueError:
-                                        results['failed_paths'].append(f"Invalid format: {line}")
-                        
-                        # バックアップを作成して名前変更
-                        backup_path = f"{path}.bak"
-                        if os.path.exists(backup_path):
-                            os.remove(backup_path)
-                        os.rename(path, backup_path)
-                        
-                    except Exception as e:
-                        self.logger.error(f"レガシー設定ファイル移行エラー {path}: {e}")
-                        results['failed_paths'].append(f"{path}: {str(e)}")
-            
-            # 必須ディレクトリの作成
-            essential_dirs = [
-                "USER_DATA_DIR", "LOGS_DIR", "DATA_DIR", "PROJECTS_DIR", 
-                "CPL_DIR", "CPL_CONFIG_DIR", "CPL_TEMP_DIR"
-            ]
-            
-            for key in essential_dirs:
-                if self.ensure_directory(key):
-                    results['created_dirs'].append(key)
-            
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"設定移行エラー: {e}")
-            return {
-                'error': str(e),
-                'migrated_paths': [],
-                'failed_paths': [str(e)],
-                'created_dirs': []
-            }
-
-    def _normalize_legacy_key(self, key: str) -> Optional[str]:
-        """
-        レガシーキーを新しい形式に変換
-        
-        Args:
-            key: レガシーキー
-            
-        Returns:
-            Optional[str]: 新しいキー。対応するものがなければNone
-        """
-        # レガシーキーと新キーのマッピング
-        key_map = {
-            'project_dir': 'PROJECTS_DIR',
-            'output_dir': 'PROJECTS_DIR',
-            'template_dir': 'TEMPLATES_DIR',
-            'master_dir': 'MASTER_DIR',
-            'database_path': 'DB_PATH',
-            'log_dir': 'LOGS_DIR',
-            'data_dir': 'DATA_DIR',
-            'export_dir': 'EXPORTS_DIR',
-            'temp_dir': 'TEMP_DIR'
-        }
-        
-        # 大文字小文字を無視して検索
-        lower_key = key.lower()
-        for old_key, new_key in key_map.items():
-            if lower_key == old_key.lower():
-                return new_key
-        
-        return None
-    
-    def auto_repair(self, issues: Optional[List[Dict[str, Any]]] = None) -> Dict[str, List]:
-        """
-        診断結果に基づく自動修復
-        
-        Args:
-            issues: 診断結果の問題リスト（Noneの場合は自動診断）
-            
-        Returns:
-            Dict[str, List]: 修復結果
-        """
-        repaired = []
-        failed = []
-        
-        # 問題リストが指定されていない場合は診断を実行
-        if issues is None:
-            diagnosis = self.diagnose()
-            issues = diagnosis["issues"]
-        
-        for issue in issues:
-            if issue.get("fixable", False):
-                if issue["type"] == "missing_dir":
-                    try:
-                        path = Path(issue["path"])
-                        path.mkdir(parents=True, exist_ok=True)
-                        repaired.append({
-                            "key": issue["key"],
-                            "path": issue["path"],
-                            "action": "created_directory"
-                        })
-                    except Exception as e:
-                        failed.append({
-                            "key": issue["key"],
-                            "path": issue["path"],
-                            "reason": f"ディレクトリ作成失敗: {e}"
-                        })
-                
-                elif issue["type"] == "db_parent_missing":
-                    try:
-                        path = Path(issue["path"])
-                        path.mkdir(parents=True, exist_ok=True)
-                        repaired.append({
-                            "key": issue["key"],
-                            "path": issue["path"],
-                            "action": "created_db_parent"
-                        })
-                    except Exception as e:
-                        failed.append({
-                            "key": issue["key"],
-                            "path": issue["path"],
-                            "reason": f"DBパス親ディレクトリ作成失敗: {e}"
-                        })
-                
-                elif issue["type"] == "projects_dir_missing":
-                    try:
-                        path = Path(issue["path"])
-                        path.mkdir(parents=True, exist_ok=True)
-                        repaired.append({
-                            "key": issue["key"],
-                            "path": issue["path"],
-                            "action": "created_projects_dir"
-                        })
-                    except Exception as e:
-                        failed.append({
-                            "key": issue["key"],
-                            "path": issue["path"],
-                            "reason": f"プロジェクトディレクトリ作成失敗: {e}"
-                        })
-        
-        return {
-            "repaired": repaired,
-            "failed": failed
-        }
+        return Path(path).exists()
     
     def check_first_run(self) -> bool:
         """
-        初回起動チェック
+        初回実行かどうかを確認
         
         Returns:
-            bool: 初回起動の場合True
+            bool: 初回実行の場合True
         """
-        # 初期化完了マークファイルの確認
-        user_data_dir = self.get_path("USER_DATA_DIR")
-        if not user_data_dir:
+        # 設定ファイルが存在しない場合は初回実行とみなす
+        if not self._config_file.exists():
+            return True
+        
+        # ユーザードキュメントの初期化マーカーがない場合も初回実行
+        init_marker = Path.home() / "Documents" / "ProjectSuite" / ".init_complete"
+        if not init_marker.exists():
             return True
             
-        init_file = os.path.join(user_data_dir, ".init_complete")
-        return not os.path.exists(init_file)
+        return False
     
-    def export_config(self, path: Optional[str] = None) -> bool:
+    def migrate_legacy_config(self) -> bool:
         """
-        設定を外部ファイルに保存
+        レガシー設定をJSONに移行
         
-        Args:
-            path: 保存先パス（Noneの場合はデフォルト）
-            
         Returns:
-            bool: 保存成功時True
+            bool: 移行成功時True
         """
-        try:
-            # 保存先パスの決定
-            if path is None:
-                user_docs = self.get_path("USER_DATA_DIR")
-                if not user_docs:
-                    user_docs = os.path.join(os.path.expanduser("~"), "Documents", "ProjectSuite")
-                path = os.path.join(user_docs, "path_settings.json")
-            
-            # 保存するデータの準備
-            export_data = {
-                "paths": self._paths,
-                "timestamp": datetime.now().isoformat(),
-                "app_version": "1.0.0"
-            }
-            
-            # 保存
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
-                
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"設定エクスポートエラー: {e}")
-            return False
-    
-    def import_config(self, path: str) -> bool:
-        """
-        設定を外部ファイルから読み込み
+        # 移行対象のデフォルトファイル
+        legacy_files = [
+            Path.home() / "Documents" / "ProjectSuite" / "defaults.txt",
+            Path(__file__).parent / "defaults.txt"
+        ]
         
-        Args:
-            path: 読み込むファイルパス
-            
-        Returns:
-            bool: 読み込み成功時True
-        """
-        try:
-            # ファイルの読み込み
-            with open(path, 'r', encoding='utf-8') as f:
-                import_data = json.load(f)
-            
-            # パスの更新
-            if 'paths' in import_data and isinstance(import_data['paths'], dict):
-                for key, value in import_data['paths'].items():
-                    self.register_path(key, value)
-                
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"設定インポートエラー: {e}")
-            return False
-    
-    def create_report(self, format: str = "text") -> str:
-        """
-        パス設定レポートを生成
+        migrated = False
         
-        Args:
-            format: レポート形式 ("text", "html", "json")
-            
-        Returns:
-            str: レポート内容
-        """
-        try:
-            # 診断の実行
-            diagnosis = self.diagnose()
-            
-            # パス情報の収集
-            paths_info = []
-            for key, path in sorted(self._paths.items()):
-                path_obj = Path(path) if path else None
-                exists = path_obj and path_obj.exists() if path else False
-                is_dir = path_obj and path_obj.is_dir() if path else False
-                
-                paths_info.append({
-                    "key": key,
-                    "path": path,
-                    "exists": exists,
-                    "is_directory": is_dir,
-                    "is_user_path": key in self._user_paths
-                })
-            
-            # テキスト形式
-            if format == "text":
-                report = ["PathRegistry レポート", "=" * 30, ""]
-                
-                # パス情報
-                report.append("登録済みパス:")
-                for info in paths_info:
-                    status = "✓" if info["exists"] else "✗"
-                    report.append(f"{status} {info['key']}: {info['path']}")
-                
-                # 問題
-                if diagnosis["issues"]:
-                    report.append("\n検出された問題:")
-                    for issue in diagnosis["issues"]:
-                        report.append(f"- {issue['type']}: {issue.get('key', '')}")
-                        report.append(f"  {issue['solution']}")
-                else:
-                    report.append("\n問題は見つかりませんでした。")
-                
-                return "\n".join(report)
-                
-            # HTML形式
-            elif format == "html":
-                html = [
-                    "<!DOCTYPE html>",
-                    "<html>",
-                    "<head>",
-                    "<title>PathRegistry レポート</title>",
-                    "<style>",
-                    "body { font-family: Arial, sans-serif; margin: 20px; }",
-                    "h1 { color: #333; }",
-                    "table { border-collapse: collapse; width: 100%; }",
-                    "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }",
-                    "th { background-color: #f2f2f2; }",
-                    "tr:nth-child(even) { background-color: #f9f9f9; }",
-                    ".error { color: red; }",
-                    ".warning { color: orange; }",
-                    ".ok { color: green; }",
-                    "</style>",
-                    "</head>",
-                    "<body>",
-                    "<h1>PathRegistry レポート</h1>",
-                    "<h2>登録済みパス</h2>",
-                    "<table>",
-                    "<tr><th>キー</th><th>パス</th><th>状態</th></tr>"
-                ]
-                
-                # パス情報
-                for info in paths_info:
-                    status_class = "ok" if info["exists"] else "error"
-                    status_text = "存在" if info["exists"] else "未検出"
-                    html.append(f"<tr><td>{info['key']}</td><td>{info['path']}</td>"
-                              f"<td class='{status_class}'>{status_text}</td></tr>")
-                
-                html.append("</table>")
-                
-                # 問題
-                if diagnosis["issues"]:
-                    html.append("<h2>検出された問題</h2><ul>")
-                    for issue in diagnosis["issues"]:
-                        severity_class = "error" if issue["severity"] == "error" else "warning"
-                        html.append(f"<li class='{severity_class}'><strong>{issue['type']}: {issue.get('key', '')}</strong><br>")
-                        html.append(f"{issue['solution']}</li>")
-                    html.append("</ul>")
-                else:
-                    html.append("<h2>問題は見つかりませんでした</h2>")
-                
-                html.extend(["</body>", "</html>"])
-                return "\n".join(html)
-                
-            # JSON形式
-            elif format == "json":
-                report_data = {
-                    "timestamp": datetime.now().isoformat(),
-                    "paths": paths_info,
-                    "diagnosis": diagnosis
-                }
-                return json.dumps(report_data, indent=2, ensure_ascii=False)
-                
-            else:
-                return f"未対応のレポート形式: {format}"
-                
-        except Exception as e:
-            self.logger.error(f"レポート生成エラー: {e}")
-            return f"レポート生成中にエラーが発生しました: {e}"
+        for file_path in legacy_files:
+            if file_path.exists():
+                try:
+                    # レガシー設定の読み込み
+                    legacy_settings = {}
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                try:
+                                    key, value = [x.strip() for x in line.split('=', 1)]
+                                    legacy_settings[key] = value
+                                except ValueError:
+                                    continue
+                    
+                    # 設定の移行
+                    for key, value in legacy_settings.items():
+                        if key.startswith('default_'):
+                            # デフォルト設定は扱わない（専用の設定クラスで扱う）
+                            continue
+                        elif key == 'custom_projects_dir':
+                            # プロジェクトディレクトリはOUTPUT_BASE_DIRに設定
+                            self.register_path("OUTPUT_BASE_DIR", value)
+                            migrated = True
+                    
+                    self.logger.info(f"Migrated legacy settings from {file_path}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to migrate legacy settings from {file_path}: {e}")
+        
+        return migrated
     
     def find_data_source(self) -> Optional[Path]:
         """
         データソースディレクトリを検索
         
         Returns:
-            Optional[Path]: 検出されたデータソースパス
+            Optional[Path]: データソースディレクトリ
         """
         # 検索場所のリスト（優先順位順）
         potential_paths = [
             # アプリケーションのデータディレクトリ
-            Path(self._app_base_path) / "data",
+            Path(__file__).parent / "data",
             
             # ProjectManagerのデータディレクトリ（複数の可能性）
-            Path(self._app_base_path) / "ProjectManager" / "data",
+            Path(__file__).parent / "ProjectManager" / "data",
             Path(os.getcwd()) / "ProjectManager" / "data",
             
             # 開発環境でよく使われるパス
@@ -773,22 +319,199 @@ class PathRegistry:
                 ])
                 
                 if has_content:
-                    self.logger.info(f"データソースディレクトリを発見: {path}")
+                    self.logger.info(f"Found data source directory: {path}")
                     return path
         
         # 見つからない場合
-        self.logger.warning("データソースディレクトリが見つかりませんでした")
+        self.logger.warning("Data source directory not found")
         return None
+    
+    def diagnose(self) -> Dict[str, Any]:
+        """
+        パス設定の診断を実行
+        
+        Returns:
+            Dict[str, Any]: 診断結果
+        """
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'paths': self.get_all_paths(),
+            'aliases': self._path_aliases.copy(),
+            'issues': [],
+            'conflicts': [],
+            'missing_dirs': []
+        }
+        
+        # パスの存在チェック
+        for key, path in self._paths.items():
+            if path and not Path(path).exists():
+                result['missing_dirs'].append({
+                    'key': key,
+                    'path': path
+                })
+        
+        # エイリアスの一貫性チェック
+        for alias_key, target_key in self._path_aliases.items():
+            if alias_key in self._paths and target_key in self._paths:
+                if self._paths[alias_key] != self._paths[target_key]:
+                    result['conflicts'].append({
+                        'alias': alias_key,
+                        'target': target_key,
+                        'alias_value': self._paths[alias_key],
+                        'target_value': self._paths[target_key]
+                    })
+        
+        # パスエイリアスの一貫性問題
+        if 'OUTPUT_BASE_DIR' in self._paths and 'PROJECTS_DIR' in self._paths:
+            if self._paths['OUTPUT_BASE_DIR'] != self._paths['PROJECTS_DIR']:
+                result['issues'].append({
+                    'type': 'path_inconsistency',
+                    'message': 'OUTPUT_BASE_DIR and PROJECTS_DIR have different values',
+                    'severity': 'warning',
+                    'output_dir': self._paths['OUTPUT_BASE_DIR'],
+                    'projects_dir': self._paths['PROJECTS_DIR']
+                })
+        
+        return result
+    
+    def auto_repair(self, issues: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        診断で見つかった問題の自動修復を試みる
+        
+        Args:
+            issues: 診断で見つかった問題
+            
+        Returns:
+            Dict[str, Any]: 修復結果
+        """
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'repaired': [],
+            'failed': []
+        }
+        
+        try:
+            # パスの不一致を修復
+            for issue in issues:
+                if issue.get('type') == 'path_inconsistency':
+                    # OUTPUT_BASE_DIRが設定されている場合、それを優先
+                    if 'output_dir' in issue and issue['output_dir']:
+                        self.register_path('OUTPUT_BASE_DIR', issue['output_dir'])
+                        result['repaired'].append({
+                            'issue': 'path_inconsistency',
+                            'message': 'Synchronized PROJECTS_DIR with OUTPUT_BASE_DIR',
+                            'value': issue['output_dir']
+                        })
+                    # そうでなければPROJECTS_DIRの値を使用
+                    elif 'projects_dir' in issue and issue['projects_dir']:
+                        self.register_path('PROJECTS_DIR', issue['projects_dir'])
+                        result['repaired'].append({
+                            'issue': 'path_inconsistency',
+                            'message': 'Synchronized OUTPUT_BASE_DIR with PROJECTS_DIR',
+                            'value': issue['projects_dir']
+                        })
+            
+            # 欠落しているディレクトリの作成
+            for missing in issues:
+                if missing.get('key') and missing.get('path'):
+                    try:
+                        Path(missing['path']).mkdir(parents=True, exist_ok=True)
+                        result['repaired'].append({
+                            'issue': 'missing_directory',
+                            'key': missing['key'],
+                            'path': missing['path'],
+                            'message': f"Created directory for {missing['key']}"
+                        })
+                    except Exception as e:
+                        result['failed'].append({
+                            'issue': 'missing_directory',
+                            'key': missing['key'],
+                            'path': missing['path'],
+                            'error': str(e)
+                        })
+            
+            # エイリアスの一貫性修復
+            for conflict in issues:
+                if conflict.get('alias') and conflict.get('target'):
+                    try:
+                        # ターゲットの値を使ってエイリアスを更新
+                        target_key = conflict['target']
+                        if target_key in self._paths:
+                            self.register_path(conflict['alias'], self._paths[target_key])
+                            result['repaired'].append({
+                                'issue': 'alias_conflict',
+                                'message': f"Synchronized {conflict['alias']} with {target_key}",
+                                'value': self._paths[target_key]
+                            })
+                    except Exception as e:
+                        result['failed'].append({
+                            'issue': 'alias_conflict',
+                            'alias': conflict['alias'],
+                            'target': conflict['target'],
+                            'error': str(e)
+                        })
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Auto-repair failed: {e}")
+            result['failed'].append({
+                'issue': 'general',
+                'error': str(e)
+            })
+            return result
+
+    def clear_all_paths(self) -> None:
+        """すべてのパス設定をクリア（テスト用）"""
+        self._paths.clear()
+        self._save_paths()
+        self.logger.warning("All paths have been cleared")
+        
+    def get_aliases_for(self, key: str) -> List[str]:
+        """
+        特定のキーに対するエイリアスの一覧を取得
+        
+        Args:
+            key: 対象のキー
+            
+        Returns:
+            List[str]: エイリアスのリスト
+        """
+        return [alias for alias, target in self._path_aliases.items() if target == key]
+    
+    def is_alias(self, key: str) -> bool:
+        """
+        指定されたキーがエイリアスかどうかを確認
+        
+        Args:
+            key: 確認するキー
+            
+        Returns:
+            bool: エイリアスの場合True
+        """
+        return key in self._path_aliases
+    
+    def get_alias_target(self, alias: str) -> Optional[str]:
+        """
+        エイリアスの参照先を取得
+        
+        Args:
+            alias: エイリアス名
+            
+        Returns:
+            Optional[str]: 参照先キー、エイリアスでない場合はNone
+        """
+        return self._path_aliases.get(alias)
 
 
 def get_path(key: str, default: Optional[str] = None) -> Optional[str]:
     """
-    グローバルユーティリティ: パスを取得
+    シングルトンからパスを取得する便利関数
     
     Args:
         key: パスのキー
         default: デフォルト値
-    
+        
     Returns:
         Optional[str]: パス
     """
@@ -796,15 +519,15 @@ def get_path(key: str, default: Optional[str] = None) -> Optional[str]:
     return registry.get_path(key, default)
 
 
-def ensure_dir(key: str) -> bool:
+def ensure_dir(key: str) -> Optional[str]:
     """
-    グローバルユーティリティ: ディレクトリを確保
+    シングルトンからディレクトリを確保する便利関数
     
     Args:
         key: ディレクトリのキー
-    
+        
     Returns:
-        bool: 成功したらTrue
+        Optional[str]: ディレクトリパス
     """
     registry = PathRegistry.get_instance()
     return registry.ensure_directory(key)
