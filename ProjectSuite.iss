@@ -1,10 +1,10 @@
 [Setup]
 AppName=ProjectSuite
-AppVersion=2025.04.23
+AppVersion=2025.04.27
 DefaultDirName={pf}\ProjectSuite
 DefaultGroupName=ProjectSuite
 OutputDir=installer
-OutputBaseFilename=ProjectSuite_Setup_2025_04_23
+OutputBaseFilename=ProjectSuite_Setup_2025_04_27
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest
@@ -26,6 +26,8 @@ Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\exports"; Per
 Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\master"; Permissions: users-full
 Name: "{userappdata}\..\Documents\ProjectSuite\ProjectManager\data\templates"; Permissions: users-full
 Name: "{userappdata}\..\Documents\ProjectSuite\logs"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\temp"; Permissions: users-full
+Name: "{userappdata}\..\Documents\ProjectSuite\backup"; Permissions: users-full
 
 [Icons]
 Name: "{group}\ProjectSuite"; Filename: "{app}\ProjectSuite.exe"

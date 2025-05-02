@@ -200,6 +200,19 @@ class DashboardGUI:
             width=150
         )
         doc_process_button.pack(side="left", padx=(0, 10))
+
+        # プロジェクト進捗ダッシュボードボタン
+        dashboard_button = ctk.CTkButton(
+            filter_frame,  # または適切なフレーム（ドキュメント処理ボタンと同じフレーム）
+            text="進捗ダッシュボード",
+            command=self.launch_project_dashboard,
+            font=self.default_font,
+            fg_color=self.colors.BUTTON_PRIMARY,
+            text_color=self.colors.BUTTON_TEXT,
+            hover_color=self.colors.BUTTON_HOVER,
+            width=150
+        )
+        dashboard_button.pack(side="left", padx=(0, 10))
         
         # ボタンフレーム
         button_frame = ctk.CTkFrame(
@@ -713,6 +726,43 @@ class DashboardGUI:
 
         except Exception as e:
             logging.error(f"アプリケーション終了処理でエラーが発生: {e}")
+
+    def launch_project_dashboard(self):
+        """
+        プロジェクト進捗ダッシュボードアプリを起動
+        """
+        try:
+            import os
+            import subprocess
+            
+            # 現在のプロジェクトを選択状態にする
+            if not self.selected_project:
+                messagebox.showinfo("情報", "プロジェクト進捗ダッシュボードを起動します。")
+                
+            # アプリケーションパス
+            app_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            dashboard_path = os.path.join(app_path, "ProjectDashboard", "ProjectDashboard.exe")
+            resolver_path = os.path.join(app_path, "path_resolver.py")
+            
+            # パス解決スクリプト実行
+            if os.path.exists(resolver_path):
+                subprocess.run(["python", resolver_path], check=True)
+            
+            # ダッシュボード起動
+            if os.path.exists(dashboard_path):
+                subprocess.Popen([dashboard_path], cwd=os.path.dirname(dashboard_path))
+                logging.info("プロジェクト進捗ダッシュボードを起動しました")
+            else:
+                # パスが見つからない場合の処理
+                messagebox.showwarning(
+                    "警告", 
+                    "プロジェクト進捗ダッシュボードが見つかりません。\n"
+                    f"確認パス: {dashboard_path}"
+                )
+                
+        except Exception as e:
+            logging.error(f"ダッシュボード起動エラー: {e}")
+            messagebox.showerror("エラー", f"プロジェクト進捗ダッシュボードの起動に失敗しました: {e}")
 
     def run(self):
         """アプリケーションの実行"""
