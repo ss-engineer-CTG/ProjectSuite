@@ -1,18 +1,17 @@
 [Setup]
 AppName=ProjectSuite
-AppVersion=2025.04.27
+AppVersion=2025.05.10
 DefaultDirName={pf}\ProjectSuite
 DefaultGroupName=ProjectSuite
 OutputDir=installer
-OutputBaseFilename=ProjectSuite_Setup_2025_04_27
+OutputBaseFilename=ProjectSuite_Setup_2025_05_10
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest
 
 [Files]
 ; アプリケーションファイル
-Source: "dist\\ProjectSuite\\ProjectSuite.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\\ProjectSuite\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\\ProjectSuite.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; initialdataコピー処理はPythonコードで実行するため削除
 

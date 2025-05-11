@@ -10,15 +10,13 @@ import sys
 from pathlib import Path
 import datetime
 import traceback
+import json
 
 def create_directories():
     """必要なディレクトリを作成"""
     directories = [
         'build',
         'dist',
-        'dist/ProjectManager/data/projects',
-        'dist/ProjectManager/data/exports',
-        'dist/ProjectManager/logs',
         'installer',
     ]
     
@@ -37,8 +35,9 @@ def build_application():
     
     # ビルド実行
     try:
+        # .specファイルを使用する場合は追加オプション不要
         result = subprocess.run(
-            ['pyinstaller', 'ProjectSuite.spec'],
+            ['pyinstaller', 'ProjectSuite.spec'],  # オプションを削除
             check=True,
             capture_output=True,
             text=True
@@ -50,7 +49,7 @@ def build_application():
         sys.exit(1)
 
 def create_spec_file():
-    """基本的なspec設定ファイルを作成"""
+    """シングルファイルモード+ウィンドウモード用のspec設定ファイルを作成"""
     spec_content = """# -*- mode: python ; coding: utf-8 -*-
 
 import os
@@ -95,7 +94,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['*.py', '*.pyc', '*.pyo'],  # Pythonソースとバイトコードを除外
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -107,31 +106,24 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='ProjectSuite',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,  # コンソール非表示
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon='resources/icon.ico' if os.path.exists('resources/icon.ico') else None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='ProjectSuite',
 )
 """
     
@@ -147,28 +139,6 @@ def copy_additional_files():
     # README、ライセンスなどのコピー
     if Path('README.md').exists():
         shutil.copy('README.md', 'dist/')
-    
-    # 初期データフォルダ構造の作成
-    data_dirs = [
-        'dist/ProjectManager/data/projects',
-        'dist/ProjectManager/data/exports',
-        'dist/ProjectManager/logs',
-    ]
-    
-    for data_dir in data_dirs:
-        if not Path(data_dir).exists():
-            Path(data_dir).mkdir(parents=True, exist_ok=True)
-            print(f"データディレクトリを作成: {data_dir}")
-    
-    # 空のファイルの作成（必要に応じて）
-    empty_files = [
-        'dist/ProjectManager/logs/app.log',
-    ]
-    
-    for empty_file in empty_files:
-        if not Path(empty_file).exists():
-            Path(empty_file).touch()
-            print(f"空のファイルを作成: {empty_file}")
     
     # initialdata フォルダをインストーラーディレクトリにコピー
     if Path('initialdata').exists():
@@ -186,35 +156,16 @@ def copy_additional_files():
     
     print("追加ファイルのコピー完了")
 
-def create_empty_db():
-    """空のデータベースファイルを作成"""
-    db_path = Path('dist/ProjectManager/data/projects.db')
-    
-    if not db_path.parent.exists():
-        db_path.parent.mkdir(parents=True)
-    
-    if not db_path.exists():
-        # 空のファイルを作成
-        db_path.touch()
-        print(f"空のデータベースファイルを作成: {db_path}")
-
 def find_exe_file():
     """実行ファイルを検索する"""
-    # 可能性のあるパスを確認
-    candidates = [
-        Path('dist/ProjectSuite.exe'),
-        Path('dist/ProjectSuite/ProjectSuite.exe')
-    ]
-    
-    # distディレクトリ内を再帰的に検索
-    if Path('dist').exists():
-        for path in Path('dist').glob('**/ProjectSuite.exe'):
-            if path not in candidates:
-                candidates.append(path)
-    
-    # 存在確認
-    for path in candidates:
-        if path.exists():
+    # シングルファイルモードでは直接dist配下にexeができる
+    exe_path = Path('dist/ProjectSuite.exe')
+    if exe_path.exists():
+        return exe_path
+        
+    # 念のため他の可能性も確認
+    for path in Path('dist').glob('**/*.exe'):
+        if path.name == 'ProjectSuite.exe':
             return path
     
     return None
@@ -233,12 +184,8 @@ def generate_installer_script():
     
     print(f"実行ファイルを検出: {exe_path}")
     
-    # 親ディレクトリのパスを取得（ソースディレクトリ）
-    source_dir = exe_path.parent
-    
-    # 実行ファイルとソースディレクトリの相対パス
+    # 実行ファイルの相対パス
     rel_exe_path = str(exe_path).replace("\\", "\\\\")
-    rel_source_dir = str(source_dir).replace("\\", "\\\\")
     
     version = datetime.datetime.now().strftime("%Y.%m.%d")
     
@@ -256,7 +203,6 @@ PrivilegesRequired=lowest
 [Files]
 ; アプリケーションファイル
 Source: "{rel_exe_path}"; DestDir: "{{app}}"; Flags: ignoreversion
-Source: "{rel_source_dir}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; initialdataコピー処理はPythonコードで実行するため削除
 
@@ -334,10 +280,26 @@ def compile_installer():
         print("InnoSetupコンパイラが見つかりません。インストーラーのコンパイルをスキップします。")
         print("手動でコンパイルするには、InnoSetupをインストールし、ProjectSuite.issファイルをコンパイルしてください。")
 
+def load_build_config():
+    """ビルド設定ファイルの読み込み"""
+    config_path = Path('build_config.json')
+    if not config_path.exists():
+        return {}
+        
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"設定ファイルの読み込みに失敗: {e}")
+        return {}
+
 def main():
     """メインビルド処理"""
     start_time = datetime.datetime.now()
     print(f"ビルドプロセスを開始... [{start_time.strftime('%Y-%m-%d %H:%M:%S')}]")
+    
+    # ビルド設定の読み込み
+    build_config = load_build_config()
     
     try:
         # 古いビルドファイルのクリーンアップ
@@ -357,9 +319,6 @@ def main():
         
         # 追加ファイルのコピー
         copy_additional_files()
-        
-        # 空のDB作成
-        create_empty_db()
         
         # インストーラースクリプトの生成
         script_generated = generate_installer_script()

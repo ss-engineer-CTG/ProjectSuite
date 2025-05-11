@@ -203,7 +203,7 @@ class DashboardGUI:
 
         # プロジェクト進捗ダッシュボードボタン
         dashboard_button = ctk.CTkButton(
-            filter_frame,  # または適切なフレーム（ドキュメント処理ボタンと同じフレーム）
+            filter_frame,
             text="進捗ダッシュボード",
             command=self.launch_project_dashboard,
             font=self.default_font,
@@ -732,28 +732,19 @@ class DashboardGUI:
         プロジェクト進捗ダッシュボードアプリを起動
         """
         try:
-            import os
             import subprocess
+            import os
             
-            # 現在のプロジェクトを選択状態にする
-            if not self.selected_project:
-                messagebox.showinfo("情報", "プロジェクト進捗ダッシュボードを起動します。")
-                
-            # アプリケーションパス
-            app_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            dashboard_path = os.path.join(app_path, "ProjectDashboard", "ProjectDashboard.exe")
-            resolver_path = os.path.join(app_path, "path_resolver.py")
+            # ダッシュボードの固定パス
+            dashboard_path = r"C:\Program Files (x86)\ProjectSuite Complete\ProjectDashboard\Project Dashboard.exe"
             
-            # パス解決スクリプト実行
-            if os.path.exists(resolver_path):
-                subprocess.run(["python", resolver_path], check=True)
-            
-            # ダッシュボード起動
+            # ファイルの存在を確認
             if os.path.exists(dashboard_path):
-                subprocess.Popen([dashboard_path], cwd=os.path.dirname(dashboard_path))
+                # サブプロセスとして起動
+                subprocess.Popen([dashboard_path])
                 logging.info("プロジェクト進捗ダッシュボードを起動しました")
             else:
-                # パスが見つからない場合の処理
+                # 実行ファイルが見つからない場合の処理
                 messagebox.showwarning(
                     "警告", 
                     "プロジェクト進捗ダッシュボードが見つかりません。\n"

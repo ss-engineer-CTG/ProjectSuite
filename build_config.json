@@ -1,0 +1,26 @@
+{
+    "application": {
+      "name": "ProjectSuite",
+      "version": "1.0.0",
+      "description": "プロジェクト管理アプリケーション"
+    },
+    "build": {
+      "mode": "onefile",
+      "console": true,
+      "debug": true,
+      "clean": true,
+      "icon": "resources/icon.ico"
+    },
+    "packaging": {
+      "installer": true,
+      "inno_setup_path": "",
+      "include_templates": true,
+      "exclude_source": true
+    },
+    "advanced": {
+      "upx": true,
+      "upx_exclude": [],
+      "bootloader_ignore_signals": false,
+      "strip": false
+    }
+  }

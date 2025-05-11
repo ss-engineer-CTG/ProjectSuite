@@ -86,7 +86,7 @@ def find_installer_and_copy_initialdata() -> bool:
         ]
         
         # インストーラーファイルのパターン
-        installer_pattern = "ProjectSuite_Setup_*.exe"
+        installer_pattern = "ProjectSuite_Setup*.exe"
         
         # インストーラーファイルを検索
         installer_found = False
@@ -633,8 +633,7 @@ def create_minimal_sample_files(target_dir):
 def setup_logging() -> None:
     """
     ログ設定を初期化する
-    
-    ログファイルとコンソールの両方に出力を設定
+    コンソール非表示時にも対応するためファイル出力を優先
     """
     try:
         # ユーザードキュメントフォルダ内にログディレクトリを作成
@@ -647,15 +646,23 @@ def setup_logging() -> None:
         
         # ファイルハンドラー（権限エラーに対応）
         try:
-            file_handler = logging.FileHandler(user_log_file, encoding='utf-8')
+            # ファイルサイズ制限付きローテーティングファイルハンドラーを使用
+            from logging.handlers import RotatingFileHandler
+            file_handler = RotatingFileHandler(
+                user_log_file, 
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5,
+                encoding='utf-8'
+            )
             handlers.append(file_handler)
         except PermissionError:
             print(f"Warning: ログファイルの作成権限がありません: {user_log_file}")
         except Exception as e:
             print(f"Warning: ログファイルハンドラーの作成に失敗: {e}")
         
-        # コンソールハンドラー（常に追加）
-        handlers.append(logging.StreamHandler(sys.stdout))
+        # 開発環境またはデバッグモード時のみコンソール出力を追加
+        if not getattr(sys, 'frozen', False) or '--debug' in sys.argv:
+            handlers.append(logging.StreamHandler(sys.stdout))
         
         # ログフォーマットの設定
         formatter = logging.Formatter(Config.LOG_FORMAT)
