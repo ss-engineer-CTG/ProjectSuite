@@ -1,0 +1,82 @@
+Sub ExecuteGanttProcesses()
+    On Error GoTo ErrorHandler
+    
+    '処理状態を管理する変数
+    Dim processStatus As Boolean
+    
+    'アプリケーションの設定を変更
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = False
+        .DisplayAlerts = False
+    End With
+    
+    '①ガントチャートシートの削除
+    processStatus = ExecuteProcess("DeleteGanttChartSheets")
+    If Not processStatus Then
+        MsgBox "ガントチャートシート削除処理でエラーが発生しました。", vbCritical
+        GoTo CleanExit
+    End If
+    
+    '②新規ガントチャートの作成
+    processStatus = ExecuteProcess("CreateGanttChart")
+    If Not processStatus Then
+        MsgBox "ガントチャート作成処理でエラーが発生しました。", vbCritical
+        GoTo CleanExit
+    End If
+    
+    '③タスクのCSVエクスポート
+    processStatus = ExecuteProcess("ExportTasksToCSV")
+    If Not processStatus Then
+        MsgBox "CSVエクスポート処理でエラーが発生しました。", vbCritical
+        GoTo CleanExit
+    End If
+    
+    '④ガントチャートシートのエクスポート
+    processStatus = ExecuteProcess("ExportGanttChartSheet")
+    If Not processStatus Then
+        MsgBox "ガントチャートシートエクスポート処理でエラーが発生しました。", vbCritical
+        GoTo CleanExit
+    End If
+    
+    '全処理完了メッセージ
+    MsgBox "すべての処理が正常に完了しました。", vbInformation
+    
+CleanExit:
+    'アプリケーションの設定を元に戻す
+    With Application
+        .ScreenUpdating = True
+        .EnableEvents = True
+        .DisplayAlerts = True
+    End With
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "予期せぬエラーが発生しました。" & vbNewLine & _
+           "エラー番号: " & Err.Number & vbNewLine & _
+           "エラー内容: " & Err.Description, vbCritical
+    Resume CleanExit
+End Sub
+
+Private Function ExecuteProcess(ByVal procName As String) As Boolean
+    On Error GoTo ProcessError
+    
+    '処理開始時刻を記録
+    Dim startTime As Double
+    startTime = Timer
+    
+    'プロセスの実行
+    Application.Run procName
+    
+    '処理完了までの待機（最低1秒）
+    While Timer < startTime + 1
+        DoEvents
+    Wend
+    
+    ExecuteProcess = True
+    Exit Function
+    
+ProcessError:
+    ExecuteProcess = False
+End Function
+

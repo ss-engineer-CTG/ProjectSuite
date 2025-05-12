@@ -6,8 +6,8 @@
     },
     "build": {
       "mode": "onefile",
-      "console": true,
-      "debug": true,
+      "console": false,
+      "debug": false,
       "clean": true,
       "icon": "resources/icon.ico"
     },

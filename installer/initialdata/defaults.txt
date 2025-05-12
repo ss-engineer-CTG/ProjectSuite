@@ -1,0 +1,8 @@
+default_project_name=新規プロジェクト
+default_manager=山田太郎
+default_reviewer=鈴木一郎
+default_approver=佐藤部長
+default_division=D001
+default_factory=F001
+default_process=P001
+default_line=L001
